@@ -1,0 +1,94 @@
+services:
+  postgresdb:
+    image: pgvector/pgvector:pg15
+    container_name: postgresdb
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: auth_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      postgresdb:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  auth_server:
+    build:
+      context: ./auth_server
+    container_name: auth_server
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgresdb:5432/auth_db
+      - REDIS_URL=redis://redis:6379/0
+      - AUTH_SERVER_URL=http://localhost:8000
+      - MANAGEMENT_URL=http://localhost:3000
+    depends_on:
+      postgresdb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  auth_server_management:
+    build:
+      context: ./auth_server_management
+    container_name: auth_server_management
+    restart: always
+    ports:
+      - "3005:3000"
+    environment:
+      - NEXT_PUBLIC_AUTH_SERVER_URL=http://localhost:8000
+    depends_on:
+      - auth_server
+
+  test_client_app1:
+    build:
+      context: ./test_client_app1
+    container_name: test_client_app1
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      - AUTH_SERVER_URL=http://auth_server:8000
+      - CLIENT_ID=test_client_id_1
+      - CLIENT_SECRET=test_client_secret_1
+      - REDIRECT_URI=http://localhost:3001/callback
+    depends_on:
+      - auth_server
+
+volumes:
+  postgres_data:
+  redis_data:
