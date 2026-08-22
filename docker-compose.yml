@@ -54,8 +54,21 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgresdb:5432/auth_db
       - REDIS_URL=redis://redis:6379/0
-      - AUTH_SERVER_URL=http://localhost:8000
-      - MANAGEMENT_URL=http://localhost:3000
+      - AUTH_SERVER_URL=${AUTH_SERVER_URL:-http://localhost:8000}
+      - MANAGEMENT_URL=${MANAGEMENT_URL:-http://localhost:3005}
+      - CENTRAL_DASHBOARD_URL=${CENTRAL_DASHBOARD_URL:-http://localhost:3005}
+      - SUCCESSFUL_SIGNUP_REDIRECT_URL=${SUCCESSFUL_SIGNUP_REDIRECT_URL:-http://localhost:3005}
+      - LOGOUT_REDIRECT_URL=${LOGOUT_REDIRECT_URL:-http://localhost:3005}
+      - RESET_DB=${RESET_DB:-true} # Set RESET_DB=true to drop & recreate tables cleanly on startup
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-smtp} # Options: "smtp" or "brevo_api"
+      - SMTP_HOST=${SMTP_HOST:-smtp-relay.brevo.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-b5f8a3001@smtp-brevo.com}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-bskt5A50grHBp1D}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      - BREVO_API_KEY=${BREVO_API_KEY:-}
+      - EMAIL_FROM=${EMAIL_FROM:-dilipdangoriya@gmail.com}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-DilipDangoriya}
     depends_on:
       postgresdb:
         condition: service_healthy
@@ -70,7 +83,7 @@ services:
     ports:
       - "3005:3000"
     environment:
-      - NEXT_PUBLIC_AUTH_SERVER_URL=http://localhost:8000
+      - NEXT_PUBLIC_AUTH_SERVER_URL=${AUTH_SERVER_URL:-http://localhost:8000}
     depends_on:
       - auth_server
 

@@ -1,20 +1,26 @@
 'use client';
 import { useEffect, useState } from 'react';
+import TailwindCheckbox from '@/app/components/TailwindCheckbox';
 
 export default function GoogleSettingsPage() {
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
+  const [showSecret, setShowSecret] = useState(false);
   const [redirectUri, setRedirectUri] = useState('http://localhost:8000/auth/google/callback');
   const [isEnabled, setIsEnabled] = useState(false);
+  const [enforce2FAAll, setEnforce2FAAll] = useState(false);
+  
   const [message, setMessage] = useState('');
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [testError, setTestError] = useState('');
+  const [showTestModal, setShowTestModal] = useState(false);
+
+  const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
 
   useEffect(() => {
     const fetchSettings = async () => {
       const token = localStorage.getItem('admin_token');
-      const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
       try {
         const res = await fetch(`${authServerUrl}/api/v1/admin/google-settings`, {
           headers: { Authorization: `Bearer ${token}` }
@@ -25,6 +31,7 @@ export default function GoogleSettingsPage() {
           setClientSecret(data.client_secret || '');
           setRedirectUri(data.redirect_uri || 'http://localhost:8000/auth/google/callback');
           setIsEnabled(!!data.is_enabled);
+          setEnforce2FAAll(!!data.enforce_2fa_all);
         }
       } catch (err) {
         console.error(err);
@@ -40,13 +47,12 @@ export default function GoogleSettingsPage() {
         handleTestCodeExchange(code);
       }
     }
-  }, []);
+  }, [authServerUrl]);
 
   const handleSave = async (e) => {
     e.preventDefault();
     setMessage('');
     const token = localStorage.getItem('admin_token');
-    const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
 
     const res = await fetch(`${authServerUrl}/api/v1/admin/google-settings`, {
       method: 'POST',
@@ -58,12 +64,13 @@ export default function GoogleSettingsPage() {
         client_id: clientId,
         client_secret: clientSecret,
         redirect_uri: redirectUri,
-        is_enabled: isEnabled
+        is_enabled: isEnabled,
+        enforce_2fa_all: enforce2FAAll
       })
     });
 
     if (res.ok) {
-      setMessage('Google OAuth Settings saved successfully!');
+      setMessage('OAuth and 2FA settings saved successfully!');
     }
   };
 
@@ -73,7 +80,6 @@ export default function GoogleSettingsPage() {
     setTestResult(null);
 
     const token = localStorage.getItem('admin_token');
-    const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
     const currentCallback = window.location.origin + window.location.pathname;
 
     try {
@@ -87,7 +93,6 @@ export default function GoogleSettingsPage() {
       }
 
       const data = await res.json();
-      // Redirect admin to Google auth consent page
       window.location.href = data.auth_url;
     } catch (err) {
       setTestError(err.message);
@@ -99,7 +104,6 @@ export default function GoogleSettingsPage() {
     setTestLoading(true);
     setTestError('');
     const token = localStorage.getItem('admin_token');
-    const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
     const currentCallback = window.location.origin + window.location.pathname;
 
     try {
@@ -122,7 +126,7 @@ export default function GoogleSettingsPage() {
 
       const data = await res.json();
       setTestResult(data);
-      // Clean query params from URL
+      setShowTestModal(true);
       window.history.replaceState({}, document.title, window.location.pathname);
     } catch (err) {
       setTestError(err.message);
@@ -134,61 +138,33 @@ export default function GoogleSettingsPage() {
   return (
     <div className="max-w-3xl space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-white">Google OAuth Settings</h1>
-        <p className="text-slate-400 text-sm">Configure Google OpenID Connect integration for Central Auth Server</p>
+        <h1 className="text-2xl font-bold text-white">Google OAuth & Global 2FA Configuration</h1>
+        <p className="text-slate-400 text-sm">Configure Google OpenID Connect integration and global security policies for IAM Auth Server</p>
       </div>
 
       {message && (
-        <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm">
+        <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm font-medium">
           {message}
         </div>
       )}
 
       {testError && (
-        <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm">
+        <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm">
           Test Error: {testError}
         </div>
       )}
 
-      {testResult && (
-        <div className="p-6 rounded-2xl bg-gradient-to-br from-emerald-950/60 via-slate-900 to-indigo-950/60 border border-emerald-500/30 shadow-2xl space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">✓</div>
-            <div>
-              <h3 className="font-bold text-emerald-400">Google OAuth Test Successful!</h3>
-              <p className="text-xs text-slate-300">Received OIDC Tokens directly from Google endpoint.</p>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <div>
-              <span className="text-xs font-semibold uppercase text-slate-400">Decoded OIDC User Profile (ID Token Claims):</span>
-              <pre className="mt-1 p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-300 overflow-x-auto">
-                {JSON.stringify(testResult.decoded_id_token, null, 2)}
-              </pre>
-            </div>
-
-            <div>
-              <span className="text-xs font-semibold uppercase text-slate-400">Full Raw Tokens Received:</span>
-              <pre className="mt-1 p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-indigo-300 overflow-x-auto max-h-48">
-                {JSON.stringify(testResult.tokens, null, 2)}
-              </pre>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <form onSubmit={handleSave} className="p-6 bg-slate-900/60 border border-slate-800 rounded-2xl shadow-xl space-y-5">
-        <div className="flex items-center justify-between p-4 rounded-xl bg-slate-950 border border-slate-800">
+      <form onSubmit={handleSave} className="p-6 bg-slate-900/60 border border-slate-800 rounded-3xl shadow-xl space-y-6">
+        <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between">
           <div>
-            <h3 className="font-semibold text-slate-200">Enable Google SSO Sign-In</h3>
+            <h3 className="font-semibold text-slate-200 text-sm">Enable Google SSO Sign-In</h3>
             <p className="text-xs text-slate-400">Allow users to log in using their Google Workspace / Gmail account</p>
           </div>
-          <input
-            type="checkbox"
+          <TailwindCheckbox
+            id="google-sso-enabled"
             checked={isEnabled}
             onChange={(e) => setIsEnabled(e.target.checked)}
-            className="w-5 h-5 rounded border-slate-700 text-purple-400 focus:ring-purple-400"
+            color="emerald"
           />
         </div>
 
@@ -199,19 +175,28 @@ export default function GoogleSettingsPage() {
             value={clientId}
             onChange={(e) => setClientId(e.target.value)}
             placeholder="123456789-abc.apps.googleusercontent.com"
-            className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
+            className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
           />
         </div>
 
         <div>
           <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Google OAuth Client Secret</label>
-          <input
-            type="password"
-            value={clientSecret}
-            onChange={(e) => setClientSecret(e.target.value)}
-            placeholder="GOCSPX-••••••••••••••••"
-            className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-          />
+          <div className="relative">
+            <input
+              type={showSecret ? 'text' : 'password'}
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              placeholder="GOCSPX-••••••••••••••••"
+              className="w-full px-4 py-3 pr-10 bg-slate-800 border border-slate-700 rounded-xl text-white font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
+            />
+            <button 
+              type="button" 
+              onClick={() => setShowSecret(!showSecret)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+            >
+              {showSecret ? '👁️' : '🙈'}
+            </button>
+          </div>
         </div>
 
         <div>
@@ -220,15 +205,15 @@ export default function GoogleSettingsPage() {
             type="text"
             value={redirectUri}
             onChange={(e) => setRedirectUri(e.target.value)}
-            className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
+            className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
           />
           <p className="text-xs text-slate-500 mt-1">Copy this callback URI into your Google Cloud Console OAuth configuration.</p>
         </div>
 
-        <div className="flex gap-4 pt-2">
+        <div className="flex flex-col sm:flex-row gap-4 pt-2">
           <button
             type="submit"
-            className="flex-1 py-3.5 bg-gradient-to-r from-purple-500 via-indigo-500 to-emerald-400 font-semibold text-white rounded-xl hover:opacity-90 transition shadow-lg shadow-purple-500/20"
+            className="flex-1 py-3.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-indigo-600 font-semibold text-white rounded-xl hover:opacity-90 transition shadow-lg shadow-emerald-500/20 text-sm"
           >
             Save Configuration
           </button>
@@ -237,13 +222,52 @@ export default function GoogleSettingsPage() {
             type="button"
             onClick={handleTestIntegration}
             disabled={testLoading || !clientId || !clientSecret}
-            className="py-3.5 px-6 bg-slate-800 border border-slate-700 font-semibold text-emerald-400 hover:bg-slate-700 rounded-xl transition disabled:opacity-40"
+            className="py-3.5 px-6 bg-slate-800 border border-slate-700 font-semibold text-emerald-400 hover:bg-slate-700 rounded-xl transition text-sm disabled:opacity-40"
           >
             {testLoading ? 'Testing...' : '⚡ Test Google Integration'}
           </button>
         </div>
       </form>
+
+      {/* Test Integration Result — persistent card, stays visible until cleared */}
+      {testResult && (
+        <div className="p-6 rounded-3xl bg-slate-900 border border-emerald-500/40 shadow-2xl space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-lg">✓</div>
+              <div>
+                <h3 className="font-bold text-emerald-400">Google OAuth Integration Test Result</h3>
+                <p className="text-xs text-slate-400">Tokens & ID Claims successfully retrieved from Google endpoints</p>
+              </div>
+            </div>
+            {/* Clear Results — removes the result card entirely */}
+            <button
+              onClick={() => setTestResult(null)}
+              className="text-slate-400 hover:text-rose-300 text-xs px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:border-rose-500/30 transition"
+            >
+              Clear Results
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <span className="text-xs font-semibold uppercase text-slate-400">Decoded ID Token Claims:</span>
+              <pre className="mt-1 p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-300 overflow-x-auto">
+                {JSON.stringify(testResult?.decoded_id_token, null, 2)}
+              </pre>
+            </div>
+
+            <div>
+              <span className="text-xs font-semibold uppercase text-slate-400">Raw Google Tokens:</span>
+              <pre className="mt-1 p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs font-mono text-indigo-300 overflow-x-auto max-h-48">
+                {JSON.stringify(testResult?.tokens, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
 

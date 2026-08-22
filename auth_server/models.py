@@ -7,6 +7,16 @@ from database import Base
 def generate_uuid():
     return str(uuid.uuid4())
 
+class Role(Base):
+    __tablename__ = "roles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, unique=True, nullable=False)
+    label = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class User(Base):
     __tablename__ = "users"
 
@@ -15,11 +25,17 @@ class User(Base):
     name = Column(String, nullable=True)
     picture = Column(String, nullable=True)
     hashed_password = Column(String, nullable=True) # Null for OAuth-only users
+    role = Column(String, default="normal-user", nullable=False)
+    role_id = Column(Integer, ForeignKey("roles.id"), nullable=True)
     is_admin = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     provider = Column(String, default="local") # "local" or "google"
+    is_2fa_enabled = Column(Boolean, default=False)
+    totp_secret = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    role_rel = relationship("Role", foreign_keys=[role_id])
 
 class ClientApp(Base):
     __tablename__ = "client_apps"
@@ -41,4 +57,5 @@ class GoogleSetting(Base):
     client_secret = Column(String, nullable=True)
     redirect_uri = Column(String, nullable=True)
     is_enabled = Column(Boolean, default=False)
+    enforce_2fa_all = Column(Boolean, default=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

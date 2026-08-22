@@ -55,7 +55,32 @@ def get_jwks():
         ]
     }
 
-def create_id_token(user_id: str, email: str, name: str, client_id: str, picture: str = None) -> str:
+import pyotp
+import qrcode
+import io
+import base64
+
+def generate_totp_secret() -> str:
+    return pyotp.random_base32()
+
+def get_totp_uri(secret: str, email: str) -> str:
+    totp = pyotp.TOTP(secret)
+    return totp.provisioning_uri(name=email, issuer_name="IAM Auth Server")
+
+def generate_qr_code_data_uri(totp_uri: str) -> str:
+    img = qrcode.make(totp_uri)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+    return f"data:image/png;base64,{b64}"
+
+def verify_totp_code(secret: str, code: str) -> bool:
+    if not secret or not code:
+        return False
+    totp = pyotp.TOTP(secret)
+    return totp.verify(code.strip())
+
+def create_id_token(user_id: str, email: str, name: str, client_id: str, picture: str = None, role: str = "normal-user", is_admin: bool = False) -> str:
     now = int(time.time())
     payload = {
         "iss": settings.AUTH_SERVER_URL,
@@ -65,29 +90,35 @@ def create_id_token(user_id: str, email: str, name: str, client_id: str, picture
         "iat": now,
         "email": email,
         "name": name or email,
-        "picture": picture or ""
+        "picture": picture or "",
+        "role": role,
+        "roles": [role],
+        "is_admin": is_admin
     }
     return jwt.encode(payload, _private_pem, algorithm="RS256", headers={"kid": "myauth-key-1"})
 
-def create_access_token(user_id: str, client_id: str, scope: str = "openid profile email") -> str:
+def create_access_token(user_id: str, client_id: str, scope: str = "openid profile email", role: str = "normal-user", is_admin: bool = False) -> str:
     now = int(time.time())
     payload = {
         "iss": settings.AUTH_SERVER_URL,
         "sub": user_id,
         "client_id": client_id,
         "scope": scope,
+        "role": role,
+        "roles": [role],
+        "is_admin": is_admin,
         "exp": now + 3600,
         "iat": now
     }
     return jwt.encode(payload, _private_pem, algorithm="RS256", headers={"kid": "myauth-key-1"})
 
-def create_admin_token(user_id: str, email: str) -> str:
+def create_admin_token(user_id: str, email: str, role: str = "admin") -> str:
     now = int(time.time())
     payload = {
         "iss": settings.AUTH_SERVER_URL,
         "sub": user_id,
         "email": email,
-        "role": "admin",
+        "role": role,
         "exp": now + (3600 * 24), # 24 hours
         "iat": now
     }

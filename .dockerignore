@@ -1,0 +1,39 @@
+# Version control
+.git
+.gitignore
+
+# Environment & Secret files
+.env
+.env*.local
+.env.production
+.env.development
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+
+# Node.js / Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Docker & CI/CD logs / temp
+.dockerignore
+*.log
+docker-compose*.override.yml
+
+# IDE / OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+README.md
+Readme.txt

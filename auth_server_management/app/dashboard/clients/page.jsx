@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import TailwindCheckbox from '@/app/components/TailwindCheckbox';
 
 export default function ClientAppsPage() {
   const [clients, setClients] = useState([]);
@@ -117,8 +118,11 @@ export default function ClientAppsPage() {
       </div>
 
       {showModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-md w-full shadow-2xl">
+        <div
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onClick={() => setShowModal(false)}
+        >
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl max-w-md w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-xl font-bold text-white mb-4">Register Client App</h2>
             <form onSubmit={handleCreateClient} className="space-y-4">
               <div>
@@ -129,9 +133,14 @@ export default function ClientAppsPage() {
                 <label className="block text-xs text-slate-400 mb-1">Redirect URIs (comma separated)</label>
                 <input type="text" required value={redirectUris} onChange={(e) => setRedirectUris(e.target.value)} placeholder="http://localhost:3001/callback" className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-400" />
               </div>
-              <div className="flex items-center gap-2">
-                <input type="checkbox" id="ssoCheck" checked={isSsoEnabled} onChange={(e) => setIsSsoEnabled(e.target.checked)} className="rounded border-slate-700 text-indigo-400" />
-                <label htmlFor="ssoCheck" className="text-sm text-slate-300">Enable Single Sign-On (SSO)</label>
+              <div className="pt-1">
+                <TailwindCheckbox
+                  id="ssoCheck"
+                  checked={isSsoEnabled}
+                  onChange={(e) => setIsSsoEnabled(e.target.checked)}
+                  label="Enable Single Sign-On (SSO)"
+                  color="indigo"
+                />
               </div>
 
               <div className="flex gap-3 pt-4">

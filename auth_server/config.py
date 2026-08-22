@@ -18,7 +18,22 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
     
     AUTH_SERVER_URL: str = "http://localhost:8000"
-    MANAGEMENT_URL: str = "http://localhost:3000"
+    MANAGEMENT_URL: str = "http://localhost:3005"
+    CENTRAL_DASHBOARD_URL: str = "http://localhost:3005"
+    SUCCESSFUL_SIGNUP_REDIRECT_URL: str = "http://localhost:3005"
+    LOGOUT_REDIRECT_URL: str = "http://localhost:3005"
+
+    # Email Service Settings (SMTP or Brevo API)
+    EMAIL_PROVIDER: str = "smtp"  # "smtp" or "brevo_api"
+    SMTP_HOST: str = "smtp.brevo.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = True
+
+    BREVO_API_KEY: str = ""
+    EMAIL_FROM: str = "no-reply@myauth.local"
+    EMAIL_FROM_NAME: str = "IAM Security Team"
 
 
     class Config:
