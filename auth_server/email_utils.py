@@ -129,3 +129,50 @@ class EmailService:
         </div>
         """
         return EmailService.send_email(to_email, subject, body_html)
+
+    @staticmethod
+    def send_password_reset_otp(to_email: str, name: str, code: str) -> bool:
+        subject = f"{code} - Verification Code to Reset Password"
+        body_html = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; background-color: #0f172a; border-radius: 16px; color: #f8fafc;">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <h1 style="color: #38bdf8; margin: 0;">IAM Security Alert</h1>
+                <p style="color: #94a3b8; font-size: 14px;">Password Reset Verification Code</p>
+            </div>
+            <div style="background-color: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155;">
+                <p style="margin-top: 0; color: #cbd5e1;">Hello {name or 'User'},</p>
+                <p style="color: #94a3b8;">You requested to reset your password. Use the 6-digit verification code below to authorize setting a new password:</p>
+                <div style="text-align: center; margin: 24px 0;">
+                    <span style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #38bdf8; font-family: monospace; background: #090d16; padding: 12px 24px; border-radius: 8px; border: 1px dashed #0284c7;">
+                        {code}
+                    </span>
+                </div>
+                <p style="color: #ef4444; font-size: 12px; margin-bottom: 0;">⚠️ Security Notice: Do not share this code with anyone. It expires in 10 minutes.</p>
+            </div>
+        </div>
+        """
+        return EmailService.send_email(to_email, subject, body_html)
+
+    @staticmethod
+    def send_2fa_disable_otp(to_email: str, name: str, code: str) -> bool:
+        subject = f"{code} - Verification Code to Disable 2FA Security"
+        body_html = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; background-color: #0f172a; border-radius: 16px; color: #f8fafc;">
+            <div style="text-align: center; margin-bottom: 20px;">
+                <h1 style="color: #f43f5e; margin: 0;">IAM Security Alert</h1>
+                <p style="color: #94a3b8; font-size: 14px;">Disable Two-Factor Authentication</p>
+            </div>
+            <div style="background-color: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155;">
+                <p style="margin-top: 0; color: #cbd5e1;">Hello {name or 'User'},</p>
+                <p style="color: #94a3b8;">You requested to disable Two-Factor Authentication on your account. Enter this 6-digit security code to confirm:</p>
+                <div style="text-align: center; margin: 24px 0;">
+                    <span style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #fb7185; font-family: monospace; background: #090d16; padding: 12px 24px; border-radius: 8px; border: 1px dashed #e11d48;">
+                        {code}
+                    </span>
+                </div>
+                <p style="color: #ef4444; font-size: 12px; margin-bottom: 0;">⚠️ Warning: Disabling 2FA will lower your account security. Code expires in 10 minutes.</p>
+            </div>
+        </div>
+        """
+        return EmailService.send_email(to_email, subject, body_html)
+

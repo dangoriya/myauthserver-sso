@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, status, Query
+from fastapi import APIRouter, Depends, HTTPException, Header, status, Query, Request
 from pydantic import BaseModel
 from typing import List, Optional
 from sqlalchemy.orm import Session
@@ -16,20 +16,27 @@ from redis_client import set_cache, get_cache, delete_cache
 
 router = APIRouter(prefix="/api/v1", tags=["IAM Management API"])
 
-def verify_token(authorization: Optional[str] = Header(None)):
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Authorization token required")
-    token = authorization.split(" ")[1]
-    payload = decode_token(token, is_admin=True)
-    if not payload:
-        # Try decoding as standard user token
-        payload = decode_token(token, is_admin=False)
-    if not payload:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    return payload
+def verify_token(request: Request, authorization: Optional[str] = Header(None)):
+    token = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+    
+    if token:
+        payload = decode_token(token)
+        if payload:
+            return payload
 
-def verify_admin(authorization: Optional[str] = Header(None)):
-    payload = verify_token(authorization)
+    # Fallback to SSO Session Cookie if token header not sent
+    sso_session_id = request.cookies.get("sso_session")
+    if sso_session_id:
+        session_data = get_cache(f"sso_session:{sso_session_id}")
+        if session_data and session_data.get("user_id"):
+            return {"sub": session_data["user_id"], "email": session_data.get("email")}
+
+    raise HTTPException(status_code=401, detail="Authentication required. Please sign in.")
+
+
+def verify_admin(payload=Depends(verify_token)):
     if payload.get("role") != "admin" and not payload.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin privileges required")
     return payload
@@ -104,8 +111,22 @@ class ChangePasswordSchema(BaseModel):
     old_password: str
     new_password: str
 
+class VerifyOldPasswordSchema(BaseModel):
+    old_password: str
+
+class ResetPasswordConfirmSchema(BaseModel):
+    otp_code: str
+    new_password: str
+
+class SetPasswordSchema(BaseModel):
+    new_password: str
+
+class Disable2FAConfirmSchema(BaseModel):
+    otp_code: str
+
 class Verify2FASchema(BaseModel):
     totp_code: str
+
 
 # Unified Login Endpoint for IAM App (Supports Admin and Normal Users)
 @router.post("/auth/login")
@@ -188,7 +209,103 @@ def iam_login_2fa_verify(data: IAMLogin2FAVerifySchema, db: Session = Depends(ge
         }
     }
 
+class OIDCStepupSchema(BaseModel):
+    user_id: str
+    client_id: str
+    redirect_uri: str
+    totp_code: str
+    state: str = ""
+    is_setup: bool = False  # True when completing initial 2FA setup
+
+@router.post("/auth/oidc-2fa-stepup")
+def oidc_2fa_stepup(data: OIDCStepupSchema, db: Session = Depends(get_db)):
+    """
+    Called by the management app 2FA pages to complete the OIDC authorization code flow
+    after successful 2FA verification. Issues an auth code that the redirect_uri can exchange
+    for tokens via the /token endpoint.
+    """
+    user = db.query(User).filter(User.id == data.user_id).first()
+    if not user or not user.totp_secret:
+        raise HTTPException(status_code=400, detail="2FA not configured for this user")
+
+    if not verify_totp_code(user.totp_secret, data.totp_code):
+        raise HTTPException(status_code=400, detail="Invalid 2FA verification code")
+
+    if data.is_setup:
+        user.is_2fa_enabled = True
+        db.commit()
+
+    # Issue SSO session cookie
+    sso_session_id = str(uuid.uuid4())
+    set_cache(f"sso_session:{sso_session_id}", {"user_id": user.id, "email": user.email}, ttl=86400)
+
+    # Issue OIDC authorization code
+    auth_code = str(uuid.uuid4())
+    set_cache(f"auth_code:{auth_code}", {
+        "user_id": user.id,
+        "client_id": data.client_id,
+        "redirect_uri": data.redirect_uri
+    }, ttl=600)
+
+    target_url = f"{data.redirect_uri}?code={auth_code}"
+    if data.state:
+        target_url += f"&state={data.state}"
+
+    return {
+        "redirect_url": target_url,
+        "sso_session_id": sso_session_id
+    }
+
+class OIDCSetupQRSchema(BaseModel):
+    user_id: str
+
+@router.post("/auth/oidc-2fa-setup-qr")
+def oidc_2fa_setup_qr(data: OIDCSetupQRSchema, db: Session = Depends(get_db)):
+    """
+    Called by the management app 2FA setup page during OIDC login.
+    Generates (or reuses existing) TOTP secret, returns QR code data URI.
+    """
+    user = db.query(User).filter(User.id == data.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not user.totp_secret:
+        user.totp_secret = generate_totp_secret()
+        db.commit()
+
+    totp_uri = get_totp_uri(user.totp_secret, user.email)
+    qr_code_uri = generate_qr_code_data_uri(totp_uri)
+
+    return {
+        "qr_code": qr_code_uri,
+        "totp_secret": user.totp_secret,
+        "service_name": "IAM Auth Server",
+        "account_name": user.email
+    }
+
+class Enable2FASchema(BaseModel):
+    user_id: str
+    totp_code: str
+
+@router.post("/auth/signup/2fa-enable")
+def signup_2fa_enable(data: Enable2FASchema, db: Session = Depends(get_db)):
+    """
+    Called after initial 2FA QR scan to verify the first TOTP code and activate 2FA on the account.
+    """
+    user = db.query(User).filter(User.id == data.user_id).first()
+    if not user or not user.totp_secret:
+        raise HTTPException(status_code=400, detail="2FA setup not initiated for this user")
+
+    if not verify_totp_code(user.totp_secret, data.totp_code):
+        raise HTTPException(status_code=400, detail="Invalid 2FA code. Please try again.")
+
+    user.is_2fa_enabled = True
+    db.commit()
+
+    return {"message": "2FA enabled successfully", "is_2fa_enabled": True}
+
 # --- CUSTOM EMAIL SIGNUP ENDPOINTS ---
+
 
 @router.post("/auth/signup/request-code")
 def signup_request_code(data: SignupRequestCodeSchema, db: Session = Depends(get_db)):
@@ -317,11 +434,75 @@ def get_profile(db: Session = Depends(get_db), current_user=Depends(verify_token
         "is_admin": user.is_admin,
         "is_active": user.is_active,
         "provider": user.provider,
+        "has_password": bool(user.hashed_password),
         "is_2fa_enabled": user.is_2fa_enabled,
         "enforce_2fa_all": enforce_2fa,
         "has_2fa_configured": bool(user.totp_secret),
         "created_at": user.created_at
     }
+
+# --- Password Management APIs ---
+
+@router.post("/user/set-password")
+def set_password(data: SetPasswordSchema, db: Session = Depends(get_db), current_user=Depends(verify_token)):
+    user = db.query(User).filter(User.id == current_user["sub"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.hashed_password:
+        raise HTTPException(status_code=400, detail="Password already set. Use Reset Password option.")
+
+    user.hashed_password = get_password_hash(data.new_password)
+    db.commit()
+    return {"message": "New password set successfully!"}
+
+@router.post("/user/password-reset/verify-old-password")
+def verify_old_password(data: VerifyOldPasswordSchema, db: Session = Depends(get_db), current_user=Depends(verify_token)):
+    user = db.query(User).filter(User.id == current_user["sub"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if not user.hashed_password or not verify_password(data.old_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect.")
+    
+    # Store old password verification state in Redis cache (valid for 10 min)
+    set_cache(f"old_pwd_verified:{user.id}", {"verified": True}, ttl=600)
+    return {"verified": True, "message": "Current password verified successfully."}
+
+@router.post("/user/password-reset/request-otp")
+def password_reset_request_otp(db: Session = Depends(get_db), current_user=Depends(verify_token)):
+    user = db.query(User).filter(User.id == current_user["sub"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    verified_state = get_cache(f"old_pwd_verified:{user.id}")
+    if not verified_state or not verified_state.get("verified"):
+        raise HTTPException(status_code=400, detail="Must verify current password first before requesting OTP.")
+
+    otp = f"{random.randint(100000, 999999)}"
+    set_cache(f"reset_password_otp:{user.id}", {"otp": otp}, ttl=600)
+
+    EmailService.send_password_reset_otp(user.email, user.name or "User", otp)
+
+    return {"message": f"Verification code sent to your email ({user.email})."}
+
+@router.post("/user/password-reset/confirm-otp")
+def password_reset_confirm_otp(data: ResetPasswordConfirmSchema, db: Session = Depends(get_db), current_user=Depends(verify_token)):
+    user = db.query(User).filter(User.id == current_user["sub"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    cached = get_cache(f"reset_password_otp:{user.id}")
+    if not cached or str(cached.get("otp")) != data.otp_code.strip():
+        raise HTTPException(status_code=400, detail="Invalid or expired email verification code.")
+
+    user.hashed_password = get_password_hash(data.new_password)
+    db.commit()
+
+    delete_cache(f"reset_password_otp:{user.id}")
+    delete_cache(f"old_pwd_verified:{user.id}")
+
+    return {"message": "Password reset successfully!"}
 
 @router.post("/user/change-password")
 def change_password(data: ChangePasswordSchema, db: Session = Depends(get_db), current_user=Depends(verify_token)):
@@ -349,6 +530,8 @@ def unlink_google(db: Session = Depends(get_db), current_user=Depends(verify_tok
     db.commit()
     return {"message": "Google account unlinked successfully"}
 
+# --- 2FA Management APIs ---
+
 @router.post("/user/2fa/setup-qr")
 def get_2fa_setup_qr(db: Session = Depends(get_db), current_user=Depends(verify_token)):
     user = db.query(User).filter(User.id == current_user["sub"]).first()
@@ -363,7 +546,9 @@ def get_2fa_setup_qr(db: Session = Depends(get_db), current_user=Depends(verify_
     qr_data_uri = generate_qr_code_data_uri(totp_uri)
     return {
         "totp_secret": user.totp_secret,
-        "qr_code": qr_data_uri
+        "qr_code": qr_data_uri,
+        "service_name": "IAM Auth Server",
+        "account_name": user.email
     }
 
 @router.post("/user/2fa/verify-and-enable")
@@ -379,16 +564,42 @@ def verify_and_enable_2fa(data: Verify2FASchema, db: Session = Depends(get_db), 
     db.commit()
     return {"message": "2FA successfully enabled"}
 
-@router.post("/user/2fa/disable")
-def disable_2fa(db: Session = Depends(get_db), current_user=Depends(verify_token)):
+# 2FA Disable via Email OTP
+@router.post("/user/2fa/disable-request-otp")
+def disable_2fa_request_otp(db: Session = Depends(get_db), current_user=Depends(verify_token)):
     user = db.query(User).filter(User.id == current_user["sub"]).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
+    if not user.is_2fa_enabled:
+        raise HTTPException(status_code=400, detail="2FA is not enabled")
+
+    otp = f"{random.randint(100000, 999999)}"
+    set_cache(f"disable_2fa_otp:{user.id}", {"otp": otp}, ttl=600)
+
+    EmailService.send_2fa_disable_otp(user.email, user.name or "User", otp)
+
+    return {"message": f"Security verification code sent to your email ({user.email})."}
+
+@router.post("/user/2fa/disable-confirm-otp")
+def disable_2fa_confirm_otp(data: Disable2FAConfirmSchema, db: Session = Depends(get_db), current_user=Depends(verify_token)):
+    user = db.query(User).filter(User.id == current_user["sub"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    cached = get_cache(f"disable_2fa_otp:{user.id}")
+    if not cached or str(cached.get("otp")) != data.otp_code.strip():
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code.")
+
     user.is_2fa_enabled = False
     user.totp_secret = None
     db.commit()
+
+    delete_cache(f"disable_2fa_otp:{user.id}")
+
     return {"message": "2FA disabled successfully"}
+
+
 
 # 2FA Reset via Email OTP
 @router.post("/user/2fa/reset-request-otp")

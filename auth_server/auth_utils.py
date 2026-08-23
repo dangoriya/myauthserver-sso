@@ -68,11 +68,21 @@ def get_totp_uri(secret: str, email: str) -> str:
     return totp.provisioning_uri(name=email, issuer_name="IAM Auth Server")
 
 def generate_qr_code_data_uri(totp_uri: str) -> str:
-    img = qrcode.make(totp_uri)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-    return f"data:image/png;base64,{b64}"
+    try:
+        import qrcode.image.svg
+        factory = qrcode.image.svg.SvgImage
+        img = qrcode.make(totp_uri, image_factory=factory)
+        buf = io.BytesIO()
+        img.save(buf)
+        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        return f"data:image/svg+xml;base64,{b64}"
+    except Exception:
+        img = qrcode.make(totp_uri)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        return f"data:image/png;base64,{b64}"
+
 
 def verify_totp_code(secret: str, code: str) -> bool:
     if not secret or not code:
@@ -125,9 +135,22 @@ def create_admin_token(user_id: str, email: str, role: str = "admin") -> str:
     return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
 
 def decode_token(token: str, is_admin: bool = False):
-    try:
-        key = settings.SECRET_KEY if is_admin else _public_pem
-        alg = "HS256" if is_admin else "RS256"
-        return jwt.decode(token, key, algorithms=[alg], options={"verify_aud": False})
-    except JWTError:
+    """
+    Decodes JWT token supporting both RS256 (OIDC Access/ID Tokens) and HS256 (IAM Local Session Tokens).
+    """
+    if not token:
         return None
+    # 1. Try RS256 (OIDC standard)
+    try:
+        return jwt.decode(token, _public_pem, algorithms=["RS256"], options={"verify_aud": False})
+    except Exception:
+        pass
+
+    # 2. Try HS256 (Local IAM session)
+    try:
+        return jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"], options={"verify_aud": False})
+    except Exception:
+        pass
+
+    return None
+
