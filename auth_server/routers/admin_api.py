@@ -653,22 +653,26 @@ def get_google_settings(db: Session = Depends(get_db)):
             "enforce_2fa_all": False
         }
     return {
-        "client_id": setting.client_id,
-        "redirect_uri": setting.redirect_uri,
+        "client_id": setting.client_id or "",
+        "client_secret": setting.client_secret or "",
+        "redirect_uri": setting.redirect_uri or "http://localhost:8000/auth/google/callback",
         "is_enabled": setting.is_enabled,
         "enforce_2fa_all": setting.enforce_2fa_all
     }
 
 @router.post("/admin/google-settings")
 def update_google_settings(data: GoogleSettingSchema, db: Session = Depends(get_db), admin=Depends(verify_admin)):
+    if data.is_enabled and (not data.client_id.strip() or not data.client_secret.strip() or not data.redirect_uri.strip()):
+        raise HTTPException(status_code=400, detail="Client ID, Client Secret, and Redirect URI are required when Google SSO is enabled")
+
     setting = db.query(GoogleSetting).filter(GoogleSetting.id == 1).first()
     if not setting:
         setting = GoogleSetting(id=1)
         db.add(setting)
     
-    setting.client_id = data.client_id
-    setting.client_secret = data.client_secret
-    setting.redirect_uri = data.redirect_uri
+    setting.client_id = data.client_id.strip()
+    setting.client_secret = data.client_secret.strip()
+    setting.redirect_uri = data.redirect_uri.strip()
     setting.is_enabled = data.is_enabled
     if data.enforce_2fa_all is not None:
         setting.enforce_2fa_all = data.enforce_2fa_all

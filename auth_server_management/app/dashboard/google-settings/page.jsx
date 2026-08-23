@@ -169,9 +169,12 @@ export default function GoogleSettingsPage() {
         </div>
 
         <div>
-          <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Google OAuth Client ID</label>
+          <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">
+            Google OAuth Client ID <span className="text-rose-400">*</span>
+          </label>
           <input
             type="text"
+            required
             value={clientId}
             onChange={(e) => setClientId(e.target.value)}
             placeholder="123456789-abc.apps.googleusercontent.com"
@@ -180,10 +183,13 @@ export default function GoogleSettingsPage() {
         </div>
 
         <div>
-          <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Google OAuth Client Secret</label>
+          <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">
+            Google OAuth Client Secret <span className="text-rose-400">*</span>
+          </label>
           <div className="relative">
             <input
               type={showSecret ? 'text' : 'password'}
+              required
               value={clientSecret}
               onChange={(e) => setClientSecret(e.target.value)}
               placeholder="GOCSPX-••••••••••••••••"
@@ -200,9 +206,12 @@ export default function GoogleSettingsPage() {
         </div>
 
         <div>
-          <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Authorized Redirect URI</label>
+          <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">
+            Authorized Redirect URI <span className="text-rose-400">*</span>
+          </label>
           <input
             type="text"
+            required
             value={redirectUri}
             onChange={(e) => setRedirectUri(e.target.value)}
             className="w-full px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl text-slate-300 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
