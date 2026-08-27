@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import TailwindSelect from '@/app/components/TailwindSelect';
 import TailwindCheckbox from '@/app/components/TailwindCheckbox';
+import TailwindModal from '@/app/components/TailwindModal';
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState([]);
@@ -11,6 +12,10 @@ export default function UserManagementPage() {
   // Enforce 2FA Step-Up for ALL Users (moved from Google OAuth & 2FA menu)
   const [enforce2FAAll, setEnforce2FAAll] = useState(false);
   const [enforceLoading, setEnforceLoading] = useState(false);
+  // Pending toggle action (shown in TailwindModal before committing)
+  const [pendingEnforce, setPendingEnforce] = useState(null); // { nextChecked: bool }
+  // Result modal shown after the toggle completes
+  const [enforceResult, setEnforceResult] = useState(null); // { tone, icon, title, description }
 
   // Real-time backend filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -54,6 +59,18 @@ export default function UserManagementPage() {
     }
   };
 
+  // Open the confirmation modal when the checkbox is clicked.
+  // The actual API call is deferred until the user clicks "Confirm"
+  // inside the modal, so cancelling simply discards the change.
+  const requestToggleEnforce2FAAll = (checked) => {
+    setPendingEnforce({ nextChecked: checked });
+  };
+
+  const cancelEnforceToggle = () => {
+    if (enforceLoading) return;
+    setPendingEnforce(null);
+  };
+
   const handleToggleEnforce2FAAll = async (checked) => {
     setEnforceLoading(true);
     const token = localStorage.getItem('admin_token');
@@ -63,7 +80,7 @@ export default function UserManagementPage() {
       });
       const gData = gRes.ok ? await gRes.json() : {};
 
-      await fetch(`${authServerUrl}/api/v1/admin/google-settings`, {
+      const saveRes = await fetch(`${authServerUrl}/api/v1/admin/google-settings`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -77,9 +94,50 @@ export default function UserManagementPage() {
           enforce_2fa_all: checked
         })
       });
+      if (!saveRes.ok) {
+        const err = await saveRes.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to update 2FA enforcement');
+      }
+      const saveData = await saveRes.json();
       setEnforce2FAAll(checked);
+      setPendingEnforce(null);
+
+      // After enabling, reload the user list so the 2FA status column
+      // immediately shows the new "Active" / "Setup" badges.
+      if (checked) {
+        await fetchUsers();
+        const updated = saveData?.users_updated_to_require_2fa ?? 0;
+        setEnforceResult({
+          tone: 'emerald',
+          icon: '✅',
+          title: '2FA enforcement enabled',
+          description:
+            `${updated} user account${updated === 1 ? '' : 's'} ` +
+            `updated to require 2FA on next login.`,
+          details:
+            'Users without a TOTP secret will see the "Setup" badge and ' +
+            'will be prompted to configure 2FA on their next login.',
+        });
+      } else {
+        setEnforceResult({
+          tone: 'amber',
+          icon: '🛈',
+          title: '2FA enforcement disabled',
+          description: 'Global 2FA requirement has been turned off.',
+          details:
+            'Individual user 2FA settings are still respected; users who ' +
+            'already configured 2FA will keep it on their profile.',
+        });
+      }
     } catch (err) {
-      console.error(err);
+      setEnforceResult({
+        tone: 'rose',
+        icon: '⚠️',
+        title: 'Failed to update 2FA enforcement',
+        description: err.message,
+      });
+      // Reload the actual state from the server so the UI reflects truth
+      await fetchEnforce2FA();
     } finally {
       setEnforceLoading(false);
     }
@@ -285,7 +343,7 @@ export default function UserManagementPage() {
         <TailwindCheckbox
           id="enforce-2fa-all-users"
           checked={enforce2FAAll}
-          onChange={(e) => handleToggleEnforce2FAAll(e.target.checked)}
+          onChange={(e) => requestToggleEnforce2FAAll(e.target.checked)}
           color="amber"
           disabled={enforceLoading}
         />
@@ -376,9 +434,31 @@ export default function UserManagementPage() {
                     </span>
                   </td>
                   <td className="p-4">
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${u.is_2fa_enabled ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-slate-800 text-slate-400'}`}>
-                      {u.is_2fa_enabled ? 'Active' : 'Off'}
-                    </span>
+                    {(() => {
+                      // 2FA status logic:
+                      //   is_2fa_enabled = false        → "Off" (grey)
+                      //   is_2fa_enabled = true, secret → "Active" (amber, TOTP configured)
+                      //   is_2fa_enabled = true, no secret → "Setup" (blue, user must configure)
+                      if (!u.is_2fa_enabled) {
+                        return (
+                          <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+                            Off
+                          </span>
+                        );
+                      }
+                      if (u.has_2fa_configured) {
+                        return (
+                          <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 inline-flex items-center gap-1">
+                            🔐 Active
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-500/20 text-sky-300 border border-sky-500/30 inline-flex items-center gap-1">
+                          ⚙ Setup
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td className="p-4">
                     <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${u.is_active ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'}`}>
@@ -602,6 +682,62 @@ export default function UserManagementPage() {
           </div>
         </div>
       )}
+
+      {/* Confirm toggle: Enforce 2FA Step-up for ALL Users */}
+      <TailwindModal
+        open={!!pendingEnforce}
+        onClose={cancelEnforceToggle}
+        onConfirm={() => handleToggleEnforce2FAAll(pendingEnforce?.nextChecked)}
+        title={
+          pendingEnforce?.nextChecked
+            ? 'Enable 2FA for all users?'
+            : 'Disable global 2FA enforcement?'
+        }
+        description={
+          pendingEnforce?.nextChecked
+            ? 'This will mark every user account as 2FA-required.'
+            : 'Global enforcement will be turned off; per-user settings still apply.'
+        }
+        icon={pendingEnforce?.nextChecked ? '🔐' : '🛡️'}
+        tone={pendingEnforce?.nextChecked ? 'amber' : 'rose'}
+        confirmLabel={pendingEnforce?.nextChecked ? 'Enable 2FA' : 'Disable'}
+        cancelLabel="Cancel"
+        loading={enforceLoading}
+      >
+        {pendingEnforce?.nextChecked ? (
+          <ul className="space-y-2 list-disc list-inside text-slate-300">
+            <li>Sets <code className="text-amber-300 font-mono">is_2fa_enabled = true</code> on every user account.</li>
+            <li>On next login, users without a configured TOTP secret will be routed to the 2FA setup page.</li>
+            <li>Existing sessions remain valid until expiry.</li>
+          </ul>
+        ) : (
+          <ul className="space-y-2 list-disc list-inside text-slate-300">
+            <li>2FA will no longer be forced on login.</li>
+            <li>Individual user 2FA settings are still respected.</li>
+            <li>Users who already configured 2FA will keep it on their profile.</li>
+          </ul>
+        )}
+      </TailwindModal>
+
+      {/* Result feedback after the toggle completes */}
+      <TailwindModal
+        open={!!enforceResult}
+        onClose={() => setEnforceResult(null)}
+        onConfirm={() => setEnforceResult(null)}
+        title={enforceResult?.title || ''}
+        description={enforceResult?.description}
+        icon={enforceResult?.icon}
+        tone={enforceResult?.tone || 'emerald'}
+        confirmLabel="OK"
+        cancelLabel="Close"
+        showSingleButton
+      >
+        {enforceResult?.details && (
+          <p className="text-slate-400 text-xs leading-relaxed">
+            {enforceResult.details}
+          </p>
+        )}
+      </TailwindModal>
     </div>
   );
 }

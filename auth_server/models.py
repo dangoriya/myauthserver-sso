@@ -47,6 +47,22 @@ class ClientApp(Base):
     redirect_uris = Column(Text, nullable=False) # Space or comma separated URIs
     allowed_grant_types = Column(String, default="authorization_code")
     is_sso_enabled = Column(Boolean, default=True)
+
+    # ----- OIDC Logout 1.0 configuration -----
+    # Comma-separated list of URIs the user can be redirected back to after
+    # RP-Initiated Logout. Must match the registered origin(s) for this client.
+    post_logout_redirect_uris = Column(Text, nullable=True)
+    # Comma-separated list of absolute URIs the OP calls (HTTP POST) to
+    # notify the client of a back-channel logout event.
+    backchannel_logout_uris = Column(Text, nullable=True)
+    # OIDC Back-Channel Logout 1.0 — when True, the OP will send a
+    # logout_token to all backchannel_logout_uris of clients whose user
+    # had an active session on this client. Required for true SLO.
+    backchannel_logout_enabled = Column(Boolean, default=False)
+    # If True, the OP will also include `sid` (session id) in the
+    # logout_token in addition to `sub`. We always include sid.
+    backchannel_logout_session_supported = Column(Boolean, default=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class GoogleSetting(Base):

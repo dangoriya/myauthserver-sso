@@ -1,0 +1,53 @@
+{# 2FA verify page — served during OIDC login flow when user already has a TOTP secret #}
+{% extends "base.html" %}
+{% import 'partials/_banners.html' as banners %}
+{% import 'partials/_field_errors.html' as ferr %}
+
+{% block title %}2FA Verification — IAM Auth Server{% endblock %}
+
+{% block content %}
+<div class="iam-card">
+  <div class="iam-logo-wrap">
+    <div class="iam-logo-icon is-amber is-icon">🛡️</div>
+    <h1 class="iam-logo-title is-amber">Two-Factor Verification</h1>
+    <p class="iam-logo-subtitle">Enter the code from your authenticator app to continue.</p>
+  </div>
+
+  {{ banners.info_html('Open <strong>Google Authenticator</strong> or <strong>Authy</strong> on your phone and enter the current 6-digit code for <em>IAM Auth Server</em>.') }}
+
+  {% if error %}{{ banners.error(error) }}{% endif %}
+  {% if notice %}{{ banners.info(notice) }}{% endif %}
+
+  <form class="iam-form iam-validate iam-auto-disable" action="/2fa-stepup-submit" method="POST" autocomplete="off" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="user_id"      value="{{ user_id }}">
+    <input type="hidden" name="client_id"    value="{{ client_id }}">
+    <input type="hidden" name="redirect_uri" value="{{ redirect_uri }}">
+    <input type="hidden" name="state"        value="{{ state }}">
+    <input type="hidden" name="is_setup"     value="false">
+
+    <div class="iam-field">
+      <label class="iam-label">Authentication Code</label>
+      <input class="iam-otp-input {{ ferr.field_class('totp_code', errors) }}"
+             type="text" name="totp_code" required maxlength="6"
+             inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
+             placeholder="· · · · · ·" autofocus
+             data-validate="otp" data-hint="otp-hint">
+      <div class="iam-otp-hint" id="otp-hint">6 digits remaining</div>
+      {{ ferr.field_error('totp_code', errors) }}
+    </div>
+
+    <button type="submit" class="iam-btn iam-btn-amber" id="btn-verify">Verify &amp; Sign In</button>
+  </form>
+
+  <div class="iam-text-center" style="margin-top:1.25rem;">
+    <a href="/authorize?client_id={{ client_id }}&amp;redirect_uri={{ redirect_uri_enc }}&amp;state={{ state }}"
+       class="iam-link-muted">← Back to sign in</a>
+  </div>
+</div>
+
+<div class="iam-security-row">
+  <span class="iam-security-dot"></span>
+  TOTP-based two-factor authentication
+</div>
+{% endblock %}

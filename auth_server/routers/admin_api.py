@@ -16,11 +16,12 @@ from redis_client import set_cache, get_cache, delete_cache
 
 router = APIRouter(prefix="/api/v1", tags=["IAM Management API"])
 
+
 def verify_token(request: Request, authorization: Optional[str] = Header(None)):
     token = None
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ")[1]
-    
+
     if token:
         payload = decode_token(token)
         if payload:
@@ -34,6 +35,26 @@ def verify_token(request: Request, authorization: Optional[str] = Header(None)):
             return {"sub": session_data["user_id"], "email": session_data.get("email")}
 
     raise HTTPException(status_code=401, detail="Authentication required. Please sign in.")
+
+
+# ---------------------------------------------------------------------------
+# Lightweight SSO session ping — used by client apps (e.g. management
+# portal) to detect that the central SSO session has been terminated
+# and trigger a local logout in any other open browser tabs.
+# ---------------------------------------------------------------------------
+@router.get("/sso/ping")
+def sso_ping(payload=Depends(verify_token)):
+    """Returns 200 if the bearer token / sso_session cookie is still valid.
+
+    Client apps poll this every ~30s. If it returns 401, the central SSO
+    session has been terminated and the app should clear its local session
+    state immediately.
+    """
+    return {
+        "ok": True,
+        "user_id": payload.get("sub"),
+        "role": payload.get("role"),
+    }
 
 
 def verify_admin(payload=Depends(verify_token)):
@@ -880,33 +901,102 @@ def update_google_settings(data: GoogleSettingSchema, db: Session = Depends(get_
     if not setting:
         setting = GoogleSetting(id=1)
         db.add(setting)
-    
+
+    previous_enforce = setting.enforce_2fa_all
     setting.client_id = data.client_id.strip()
     setting.client_secret = data.client_secret.strip()
     setting.redirect_uri = data.redirect_uri.strip()
     setting.is_enabled = data.is_enabled
     if data.enforce_2fa_all is not None:
         setting.enforce_2fa_all = data.enforce_2fa_all
-    db.commit()
-    return {"message": "OAuth and 2FA settings updated"}
+
+    # If we're turning the global 2FA enforcement ON, flip every user's
+    # is_2fa_enabled flag to True. Users who haven't configured a TOTP
+    # secret yet will see "Setup" status in the user table and will be
+    # routed through the 2FA setup page on next login.
+    users_updated = 0
+    if data.enforce_2fa_all is True and not previous_enforce:
+        users_updated = (
+            db.query(User)
+              .filter(User.is_2fa_enabled == False)  # noqa: E712
+              .update({User.is_2fa_enabled: True}, synchronize_session=False)
+        )
+        db.commit()
+    else:
+        db.commit()
+
+    return {
+        "message": "OAuth and 2FA settings updated",
+        "users_updated_to_require_2fa": users_updated,
+    }
 
 @router.get("/admin/google-test/url")
 def get_google_test_url(redirect_uri: str, db: Session = Depends(get_db), admin=Depends(verify_admin)):
+    """Build the Google OAuth authorization URL for the "Test Integration" flow.
+
+    IMPORTANT: The `redirect_uri` we send to Google MUST be the auth_server's
+    own /auth/google/callback (which the operator has registered in the
+    Google Cloud Console). Google rejects the request if the redirect URI
+    doesn't exactly match the registered value.
+
+    We achieve the round-trip back to the management page by encoding the
+    management page's URL in the OAuth `state` parameter. When Google
+    redirects to /auth/google/callback, our callback handler detects the
+    test-mode state and re-redirects to the management page (carrying the
+    authorization `code`).
+    """
     setting = db.query(GoogleSetting).filter(GoogleSetting.id == 1).first()
     if not setting or not setting.client_id or not setting.client_secret:
-        raise HTTPException(status_code=400, detail="Google OAuth settings are incomplete")
-    
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Google OAuth settings are incomplete. "
+                "Please configure client_id, client_secret, and redirect_uri first."
+            ),
+        )
+    if not setting.is_enabled:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Google SSO is currently disabled. Enable 'Google SSO Sign-In' "
+                "in the form above, save, then run the test."
+            ),
+        )
+
+    # Build the URL that Google will redirect to after login.
+    # This MUST match the redirect_uri registered in Google Cloud Console.
+    callback_uri = setting.redirect_uri or f"{settings.AUTH_SERVER_URL}/auth/google/callback"
+
+    # The state encodes:
+    #   test_mode marker (__test__|<management_postback_url>)
+    # so the /auth/google/callback handler can route the response back
+    # to the management app's test page instead of completing an OIDC login.
     import urllib.parse
+    test_state = f"__test__|{redirect_uri}"
+
     params = {
         "client_id": setting.client_id,
-        "redirect_uri": redirect_uri,
+        "redirect_uri": callback_uri,
         "response_type": "code",
         "scope": "openid email profile",
         "access_type": "offline",
-        "prompt": "consent"
+        "prompt": "consent",
+        "state": test_state,
     }
     url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
-    return {"auth_url": url}
+
+    return {
+        "auth_url": url,
+        # Echo back the URIs the operator needs to register in Google:
+        "required_redirect_uri": callback_uri,
+        "message": (
+            f"Make sure the following redirect URI is registered in your "
+            f"Google Cloud Console OAuth client configuration:\n\n"
+            f"  {callback_uri}\n\n"
+            f"(also OK to register both the auth_server callback AND the "
+            f"management page URL if you want browser-side flow)"
+        ),
+    }
 
 class GoogleTestTokenExchangeSchema(BaseModel):
     code: str
@@ -914,9 +1004,18 @@ class GoogleTestTokenExchangeSchema(BaseModel):
 
 @router.post("/admin/google-test/exchange")
 async def exchange_google_test_code(data: GoogleTestTokenExchangeSchema, db: Session = Depends(get_db), admin=Depends(verify_admin)):
+    """Exchange the authorization code from Google for tokens, using the
+    EXACT redirect_uri that was sent to Google (i.e. the auth_server's
+    /auth/google/callback, which must be registered in the Google
+    Cloud Console). The `data.redirect_uri` from the management app
+    is informational; we ALWAYS use the auth_server's registered URI.
+    """
     setting = db.query(GoogleSetting).filter(GoogleSetting.id == 1).first()
     if not setting or not setting.client_id or not setting.client_secret:
         raise HTTPException(status_code=400, detail="Google OAuth settings are incomplete")
+
+    # MUST match the redirect_uri we sent to Google in /admin/google-test/url
+    callback_uri = setting.redirect_uri or f"{settings.AUTH_SERVER_URL}/auth/google/callback"
 
     import httpx
     token_url = "https://oauth2.googleapis.com/token"
@@ -924,14 +1023,22 @@ async def exchange_google_test_code(data: GoogleTestTokenExchangeSchema, db: Ses
         "code": data.code,
         "client_id": setting.client_id,
         "client_secret": setting.client_secret,
-        "redirect_uri": data.redirect_uri,
-        "grant_type": "authorization_code"
+        "redirect_uri": callback_uri,
+        "grant_type": "authorization_code",
     }
 
     async with httpx.AsyncClient() as client:
         res = await client.post(token_url, data=payload)
         if res.status_code != 200:
-            raise HTTPException(status_code=res.status_code, detail=f"Google Token exchange failed: {res.text}")
+            raise HTTPException(
+                status_code=res.status_code,
+                detail=(
+                    f"Google token exchange failed: {res.text}\n\n"
+                    f"Make sure '{callback_uri}' is registered as an "
+                    f"Authorized Redirect URI in your Google Cloud Console "
+                    f"OAuth client configuration."
+                ),
+            )
         token_data = res.json()
 
         id_token_jwt = token_data.get("id_token")
@@ -943,6 +1050,7 @@ async def exchange_google_test_code(data: GoogleTestTokenExchangeSchema, db: Ses
         return {
             "success": True,
             "tokens": token_data,
-            "decoded_id_token": id_token_payload
+            "decoded_id_token": id_token_payload,
+            "redirect_uri_used": callback_uri,
         }
 

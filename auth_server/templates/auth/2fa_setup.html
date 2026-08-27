@@ -1,0 +1,77 @@
+{# 2FA setup page — served during OIDC login flow when user has no TOTP secret yet #}
+{% extends "base.html" %}
+{% import 'partials/_banners.html' as banners %}
+{% import 'partials/_field_errors.html' as ferr %}
+
+{% block title %}Set Up 2FA — IAM Auth Server{% endblock %}
+
+{% block content %}
+<div class="iam-card">
+  <div class="iam-logo-wrap">
+    <div class="iam-logo-icon is-amber is-icon">🔐</div>
+    <h1 class="iam-logo-title is-amber">Set Up Two-Factor Auth</h1>
+    <p class="iam-logo-subtitle">Your account requires 2FA. Scan the QR code to get started.</p>
+  </div>
+
+  <div class="iam-steps">
+    <div class="iam-step-dot is-active" id="step1">1</div>
+    <div class="iam-step-line"></div>
+    <div class="iam-step-dot" id="step2">2</div>
+    <div class="iam-step-line"></div>
+    <div class="iam-step-dot" id="step3">3</div>
+  </div>
+
+  {% if error %}{{ banners.error(error) }}{% endif %}
+  {% if notice %}{{ banners.info(notice) }}{% endif %}
+
+  <div class="iam-qr-wrap">
+    <div class="iam-qr-box">
+      <img src="{{ qr_code }}" alt="2FA QR code">
+    </div>
+    <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.6rem;">
+      Scan with <strong style="color:#a5b4fc">Google Authenticator</strong> or <strong style="color:#a5b4fc">Authy</strong>
+    </p>
+    <div class="iam-secret-box">
+      <span class="iam-secret-key" id="secret-key">{{ totp_secret }}</span>
+      <button type="button" class="iam-secret-copy" data-copy-target="secret-key">Copy</button>
+    </div>
+    <p style="font-size:0.7rem;color:var(--text-dim);margin-top:0.4rem;">
+      Can't scan? Enter the secret key manually in your authenticator app.
+    </p>
+  </div>
+
+  <form class="iam-form iam-validate iam-auto-disable" action="/2fa-stepup-submit" method="POST" autocomplete="off" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="user_id"      value="{{ user_id }}">
+    <input type="hidden" name="client_id"    value="{{ client_id }}">
+    <input type="hidden" name="redirect_uri" value="{{ redirect_uri }}">
+    <input type="hidden" name="state"        value="{{ state }}">
+    <input type="hidden" name="is_setup"     value="true">
+
+    <div class="iam-field">
+      <label class="iam-label">Enter 6-digit code from your app</label>
+      <input class="iam-otp-input {{ ferr.field_class('totp_code', errors) }}"
+             type="text" name="totp_code" required maxlength="6"
+             inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
+             placeholder="· · · · · ·" autofocus
+             data-validate="otp" data-hint="otp-hint">
+      <div class="iam-otp-hint" id="otp-hint">6 digits remaining</div>
+      {{ ferr.field_error('totp_code', errors) }}
+    </div>
+
+    <button type="submit" class="iam-btn iam-btn-amber" id="btn-verify">
+      Verify &amp; Activate 2FA
+    </button>
+  </form>
+
+  <div class="iam-text-center" style="margin-top:1.25rem;">
+    <a href="/authorize?client_id={{ client_id }}&amp;redirect_uri={{ redirect_uri_enc }}&amp;state={{ state }}"
+       class="iam-link-muted">← Back to sign in</a>
+  </div>
+</div>
+
+<div class="iam-security-row">
+  <span class="iam-security-dot"></span>
+  TOTP-based two-factor authentication
+</div>
+{% endblock %}

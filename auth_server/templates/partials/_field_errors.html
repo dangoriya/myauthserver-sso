@@ -1,0 +1,16 @@
+{# Field-level error message.
+   Usage: {{ field_error('email', errors) }}
+   Renders only if errors has a key 'email'. #}
+{% macro field_error(name, errors) -%}
+  {% if errors and errors.get(name) %}
+    <p class="iam-field-error" data-field-error="{{ name }}" role="alert">
+      <span aria-hidden="true">⚠</span> {{ errors[name] }}
+    </p>
+  {% endif %}
+{%- endmacro %}
+
+{# Apply is-error class if a field has an error.
+   Usage: <input class="iam-input {{ field_class('email', errors) }}"> #}
+{% macro field_class(name, errors) -%}
+  {% if errors and errors.get(name) %}is-error{% endif %}
+{%- endmacro %}

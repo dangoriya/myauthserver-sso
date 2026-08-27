@@ -1,0 +1,23 @@
+{# Generic error page #}
+{% extends "base.html" %}
+{% import 'partials/_banners.html' as banners %}
+
+{% block title %}{{ title }} — IAM Auth Server{% endblock %}
+
+{% block content %}
+<div class="iam-card">
+  <div class="iam-logo-wrap">
+    <div class="iam-logo-icon is-amber is-icon">⚠️</div>
+    <h1 class="iam-logo-title is-amber">{{ title }}</h1>
+  </div>
+
+  <div class="iam-banner iam-banner-error">
+    <span aria-hidden="true">⛔</span>
+    <span>{{ message|safe }}</span>
+  </div>
+
+  <div class="iam-text-center" style="margin-top:1.25rem;">
+    <a href="/authorize" class="iam-btn iam-btn-primary" style="text-decoration:none;">← Return to Sign In</a>
+  </div>
+</div>
+{% endblock %}

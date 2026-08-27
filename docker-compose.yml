@@ -4,8 +4,8 @@ services:
     container_name: postgresdb
     restart: always
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
       POSTGRES_DB: auth_db
     ports:
       - "5432:5432"
@@ -23,7 +23,7 @@ services:
     restart: always
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@example.com
-      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_DEFAULT_PASSWORD: admin123
     ports:
       - "5050:80"
     depends_on:
@@ -59,6 +59,10 @@ services:
       - CENTRAL_DASHBOARD_URL=${CENTRAL_DASHBOARD_URL:-http://localhost:3005}
       - SUCCESSFUL_SIGNUP_REDIRECT_URL=${SUCCESSFUL_SIGNUP_REDIRECT_URL:-http://localhost:3005}
       - LOGOUT_REDIRECT_URL=${LOGOUT_REDIRECT_URL:-http://localhost:3005}
+      # Internal URL the OP uses to reach client apps for OIDC Back-Channel
+      # Logout. Falls back to host.docker.internal so back-channel POSTs
+      # can reach apps running on the Docker host (e.g. developer machine).
+      - CLIENT_CALLBACK_BASE_URL=${CLIENT_CALLBACK_BASE_URL:-http://host.docker.internal}
       - RESET_DB=${RESET_DB:-true} # Set RESET_DB=true to drop & recreate tables cleanly on startup
       - EMAIL_PROVIDER=${EMAIL_PROVIDER:-smtp} # Options: "smtp" or "brevo_api"
       - SMTP_HOST=${SMTP_HOST:-smtp-relay.brevo.com}
@@ -69,11 +73,18 @@ services:
       - BREVO_API_KEY=${BREVO_API_KEY:-}
       - EMAIL_FROM=${EMAIL_FROM:-dilipdangoriya@gmail.com}
       - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-DilipDangoriya}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3005,http://localhost:3001}
+    volumes:
+      - auth_server_keys:/app/keys
     depends_on:
       postgresdb:
         condition: service_healthy
       redis:
         condition: service_healthy
+    extra_hosts:
+      # Lets the OP reach client apps running on the host machine for
+      # back-channel logout. Add other host names here as needed.
+      - "host.docker.internal:host-gateway"
 
   auth_server_management:
     build:
@@ -86,6 +97,8 @@ services:
       - NEXT_PUBLIC_AUTH_SERVER_URL=${AUTH_SERVER_URL:-http://localhost:8000}
     depends_on:
       - auth_server
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   test_client_app1:
     build:
@@ -95,13 +108,26 @@ services:
     ports:
       - "3001:3001"
     environment:
-      - AUTH_SERVER_URL=http://auth_server:8000
+      # PUBLIC URL: the browser-facing auth_server address. The user types
+      # http://localhost:3001 in their browser, then the test client
+      # redirects them to http://localhost:8000/authorize. The browser
+      # can't resolve `auth_server` over the Docker network, so this MUST
+      # be the public localhost URL.
+      - AUTH_SERVER_URL=http://localhost:8000
+      # INTERNAL URL: server-to-server axios calls (token exchange,
+      # userinfo, JWKS fetch). The Node process runs inside the Docker
+      # network and can resolve the `auth_server` service name.
+      - INTERNAL_AUTH_SERVER_URL=http://auth_server:8000
       - CLIENT_ID=test_client_id_1
       - CLIENT_SECRET=test_client_secret_1
       - REDIRECT_URI=http://localhost:3001/callback
+      # Public URL the user's browser uses to reach this app (used to
+      # build the post_logout_redirect_uri).
+      - PUBLIC_BASE_URL=http://localhost:3001
     depends_on:
       - auth_server
 
 volumes:
   postgres_data:
   redis_data:
+  auth_server_keys:

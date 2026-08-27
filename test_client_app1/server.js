@@ -8,9 +8,18 @@ app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
 
 const AUTH_SERVER_URL = process.env.AUTH_SERVER_URL || 'http://localhost:8000';
+// When this app runs inside Docker it needs to talk to the auth_server
+// over the Docker network (service-name DNS). We separate the two URLs
+// because the user's browser must use the *public* URL while the server
+// uses the *internal* one.
+const INTERNAL_AUTH_SERVER_URL =
+  process.env.INTERNAL_AUTH_SERVER_URL || AUTH_SERVER_URL;
 const CLIENT_ID       = process.env.CLIENT_ID       || 'test_client_id_1';
 const CLIENT_SECRET   = process.env.CLIENT_SECRET   || 'test_client_secret_1';
 const REDIRECT_URI    = process.env.REDIRECT_URI    || 'http://localhost:3001/callback';
+// Public URL the user's browser uses to reach this app (used to build
+// the post_logout_redirect_uri).
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'http://localhost:3001';
 
 // ---------------------------------------------------------------------------
 // Inline CSS — dark premium design
@@ -244,6 +253,7 @@ app.get('/', (req, res) => {
     </div>
 
     <a href="/logout" class="btn btn-danger">Sign Out (Single Logout)</a>
+    <a href="/tokens" class="btn btn-primary" style="margin-top:0.5rem;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc;text-decoration:none;text-align:center;">View OIDC Tokens →</a>
   </div>
 
   <div class="footer">
@@ -358,20 +368,20 @@ app.get('/callback', async (req, res) => {
       client_secret: CLIENT_SECRET,
     });
 
-    const tokenRes = await axios.post(`${AUTH_SERVER_URL}/token`, params, {
+    const tokenRes = await axios.post(`${INTERNAL_AUTH_SERVER_URL}/token`, params, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     });
 
     const { access_token, id_token } = tokenRes.data;
 
     // Fetch user profile from /userinfo
-    const userRes = await axios.get(`${AUTH_SERVER_URL}/userinfo`, {
+    const userRes = await axios.get(`${INTERNAL_AUTH_SERVER_URL}/userinfo`, {
       headers: { Authorization: `Bearer ${access_token}` }
     });
 
     const profile = userRes.data;
 
-    // Also parse id_token for extra claims (role, is_admin)
+    // Also parse id_token for extra claims (role, is_admin, sid)
     const idPayload = id_token ? parseJwtPayload(id_token) : {};
 
     const userObj = {
@@ -382,9 +392,11 @@ app.get('/callback', async (req, res) => {
       is_admin: profile.is_admin || idPayload.is_admin || false,
       provider: profile.provider || idPayload.provider || 'local',
       picture:  profile.picture || idPayload.picture || '',
+      sid:      idPayload.sid || '',
     };
 
     res.cookie('app_session', access_token, { httpOnly: true, maxAge: 3600 * 1000 });
+    res.cookie('app_id_token', id_token, { httpOnly: true, maxAge: 3600 * 1000 });
     res.cookie('app_user', JSON.stringify(userObj), { httpOnly: true, maxAge: 3600 * 1000 });
     res.redirect('/');
   } catch (err) {
@@ -395,14 +407,205 @@ app.get('/callback', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /logout — Step 3: clear session and trigger IAM Single Logout
+// POST /backchannel-logout — OIDC Back-Channel Logout 1.0 endpoint
+//
+// The auth server POSTs a signed `logout_token` JWT (Content-Type:
+// application/x-www-form-urlencoded) to this URI when a central SSO
+// session is terminated. We MUST verify the signature using the OP's
+// public key, then invalidate the local session for the user identified
+// by `sub` (or `sid` if the OP supports session-based logout).
+// ---------------------------------------------------------------------------
+const recentJti = new Map(); // jti -> exp_ts, simple replay protection
+function rememberJti(jti, exp) {
+  recentJti.set(jti, exp);
+  // Opportunistic cleanup
+  const now = Math.floor(Date.now() / 1000);
+  for (const [k, e] of recentJti.entries()) {
+    if (e <= now) recentJti.delete(k);
+  }
+}
+
+app.post('/backchannel-logout', express.text({ type: '*/*' }), async (req, res) => {
+  try {
+    const logoutToken = (req.body || '').toString();
+    if (!logoutToken) {
+      return res.status(400).json({ error: 'invalid_request' });
+    }
+
+    // Fetch the OP JWKS
+    const jwksRes = await axios.get(`${INTERNAL_AUTH_SERVER_URL}/jwks.json`);
+    const jwks = jwksRes.data;
+    const header = JSON.parse(Buffer.from(logoutToken.split('.')[0], 'base64url').toString());
+    const jwk = (jwks.keys || []).find(k => k.kid === header.kid);
+    if (!jwk) {
+      return res.status(400).json({ error: 'invalid_token' });
+    }
+
+    // Build a public key from JWK and verify signature using jose.
+    // For brevity, we use the Node crypto + jsonwebtoken approach below.
+    const jose = require('jose');
+    const publicKey = await jose.importJWK(jwk, 'RS256');
+    const { payload } = await jose.jwtVerify(logoutToken, publicKey, {
+      issuer: AUTH_SERVER_URL,
+      audience: CLIENT_ID,
+    });
+
+    // Replay protection
+    if (payload.jti) {
+      if (recentJti.has(payload.jti)) {
+        return res.status(200).json({ ok: true, replay: true });
+      }
+      rememberJti(payload.jti, payload.exp);
+    }
+
+    // Validate the events claim
+    if (!payload.events || !payload.events['http://schemas.openid.net/event/backchannel-logout']) {
+      return res.status(400).json({ error: 'invalid_token', reason: 'missing events claim' });
+    }
+
+    // Invalidate local session. We could match by `sid` if we stored it
+    // alongside the session; for now we wipe any app_session/app_user
+    // for this user. In a real multi-session browser you'd key by sid.
+    console.log(`[backchannel-logout] user=${payload.sub} sid=${payload.sid} → clearing local session`);
+    res.clearCookie('app_session');
+    res.clearCookie('app_id_token');
+    res.clearCookie('app_user');
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('[backchannel-logout] error:', err.message);
+    return res.status(400).json({ error: 'invalid_token', detail: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /logout — RP-Initiated Logout (front-channel).
+//
+// Standard OIDC flow:
+//   1. User clicks "Sign Out" on this app
+//   2. We clear our LOCAL cookies immediately (so the user sees a logged-out UI)
+//   3. We redirect the browser to the OP's /logout endpoint with
+//      - id_token_hint   (so the OP knows who is logging out)
+//      - client_id       (so the OP knows which client initiated)
+//      - post_logout_redirect_uri (must be registered with the OP)
+//      - state           (echoed back to the post_logout URL)
+//   4. The OP terminates the central SSO session and POSTs a logout_token
+//      to every other client app the user had a session on (back-channel).
+//   5. The OP redirects the browser back to our post_logout_redirect_uri.
 // ---------------------------------------------------------------------------
 app.get('/logout', (req, res) => {
+  const idToken = req.cookies.app_id_token;
+  const postLogoutUri = `${PUBLIC_BASE_URL}/logged-out`;
+  const params = new URLSearchParams();
+  if (idToken) params.set('id_token_hint', idToken);
+  params.set('client_id', CLIENT_ID);
+  params.set('post_logout_redirect_uri', postLogoutUri);
+  if (req.query.state) params.set('state', String(req.query.state));
+
+  // Clear local cookies immediately
   res.clearCookie('app_session');
+  res.clearCookie('app_id_token');
   res.clearCookie('app_user');
   res.clearCookie('oauth_state');
-  const postLogoutUri = encodeURIComponent('http://localhost:3001');
-  res.redirect(`${AUTH_SERVER_URL}/logout?post_logout_redirect_uri=${postLogoutUri}`);
+
+  res.redirect(`${AUTH_SERVER_URL}/logout?${params.toString()}`);
+});
+
+// GET /logged-out — destination after the OP redirects the user back.
+// This is the registered post_logout_redirect_uri.
+app.get('/logged-out', (req, res) => {
+  const state = req.query.state ? `<p style="margin-top:1rem;color:var(--dim);font-size:0.75rem;">state: <code>${req.query.state}</code></p>` : '';
+  res.send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Signed Out</title>
+<style>${CSS}</style></head><body>
+<div class="wrapper"><div class="card" style="text-align:center;">
+  <div class="app-logo">✓</div>
+  <h1 class="app-title">Signed Out</h1>
+  <p class="app-sub" style="margin-bottom:1.5rem;">You have been securely signed out of all your apps via central SSO.</p>
+  <a href="/" class="btn btn-primary">Sign back in</a>
+  ${state}
+</div></div></body></html>`);
+});
+
+// ---------------------------------------------------------------------------
+// GET /tokens — Debug page that shows the OIDC tokens this client received.
+// Useful for inspecting the id_token claims, expiry, signature etc.
+// Also exposes a JSON variant at /tokens.json for programmatic access.
+// ---------------------------------------------------------------------------
+function buildTokenDebugHtml(tokens) {
+  const idPayload = tokens.id_payload;
+  const accessPayload = tokens.access_payload;
+  const expiresIn = idPayload.exp ? Math.max(0, idPayload.exp - Math.floor(Date.now() / 1000)) : 0;
+  const ttl = Math.floor(expiresIn / 60) + 'm ' + (expiresIn % 60) + 's';
+
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Tokens — Test App 1</title>
+<style>${CSS}</style></head><body>
+<div class="wrapper" style="max-width:680px;">
+  <div class="card">
+    <div class="app-header">
+      <div class="app-logo">🔑</div>
+      <h1 class="app-title">OIDC Tokens</h1>
+      <p class="app-sub">Tokens issued to this client by IAM Central Auth</p>
+    </div>
+
+    <div class="token-summary" style="text-align:left;">
+      <div class="token-row"><span class="token-key">Issuer</span><span class="token-val">${idPayload.iss || '—'}</span></div>
+      <div class="token-row"><span class="token-key">Subject</span><span class="token-val" style="font-family:monospace;font-size:0.72rem;">${idPayload.sub || '—'}</span></div>
+      <div class="token-row"><span class="token-key">Audience</span><span class="token-val">${idPayload.aud || '—'}</span></div>
+      <div class="token-row"><span class="token-key">Session ID (sid)</span><span class="token-val" style="font-family:monospace;font-size:0.72rem;">${idPayload.sid || '—'}</span></div>
+      <div class="token-row"><span class="token-key">ID token expires in</span><span class="token-val">${ttl}</span></div>
+    </div>
+
+    <h3 style="font-size:0.85rem;margin:1.25rem 0 0.5rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;">ID Token Claims</h3>
+    <pre style="background:rgba(8,14,26,0.7);border:1px solid rgba(30,41,59,0.8);border-radius:12px;padding:0.9rem;font-size:0.74rem;color:#a5b4fc;overflow-x:auto;max-height:280px;">${JSON.stringify(idPayload, null, 2)}</pre>
+
+    <h3 style="font-size:0.85rem;margin:1.25rem 0 0.5rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;">Access Token Claims</h3>
+    <pre style="background:rgba(8,14,26,0.7);border:1px solid rgba(30,41,59,0.8);border-radius:12px;padding:0.9rem;font-size:0.74rem;color:#a5b4fc;overflow-x:auto;max-height:240px;">${JSON.stringify(accessPayload, null, 2)}</pre>
+
+    <details style="margin-top:1rem;">
+      <summary style="cursor:pointer;color:var(--muted);font-size:0.78rem;">Raw ID token (JWT)</summary>
+      <pre style="background:rgba(8,14,26,0.7);border:1px solid rgba(30,41,59,0.8);border-radius:12px;padding:0.9rem;font-size:0.7rem;color:#94a3b8;overflow-x:auto;word-break:break-all;margin-top:0.5rem;">${tokens.id_token || '—'}</pre>
+    </details>
+    <details style="margin-top:0.5rem;">
+      <summary style="cursor:pointer;color:var(--muted);font-size:0.78rem;">Raw access token (JWT)</summary>
+      <pre style="background:rgba(8,14,26,0.7);border:1px solid rgba(30,41,59,0.8);border-radius:12px;padding:0.9rem;font-size:0.7rem;color:#94a3b8;overflow-x:auto;word-break:break-all;margin-top:0.5rem;">${tokens.access_token || '—'}</pre>
+    </details>
+
+    <div style="display:flex;gap:0.5rem;margin-top:1.25rem;">
+      <a href="/" class="btn btn-primary" style="flex:1;text-decoration:none;">← Back to Profile</a>
+      <a href="/tokens.json" target="_blank" class="btn btn-primary" style="flex:1;background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc;text-decoration:none;">View JSON</a>
+    </div>
+  </div>
+  <div class="footer"><p>Test Client App 1 · <a href="${AUTH_SERVER_URL}">IAM Auth Server</a></p></div>
+</div></body></html>`;
+}
+
+app.get('/tokens', (req, res) => {
+  const idToken = req.cookies.app_id_token;
+  const accessToken = req.cookies.app_session;
+  if (!idToken || !accessToken) {
+    return res.redirect('/?error=Not+signed+in');
+  }
+  res.send(buildTokenDebugHtml({
+    id_token: idToken,
+    access_token: accessToken,
+    id_payload: parseJwtPayload(idToken),
+    access_payload: parseJwtPayload(accessToken),
+  }));
+});
+
+app.get('/tokens.json', (req, res) => {
+  const idToken = req.cookies.app_id_token;
+  const accessToken = req.cookies.app_session;
+  if (!idToken || !accessToken) {
+    return res.status(401).json({ error: 'Not signed in' });
+  }
+  res.json({
+    id_token: idToken,
+    access_token: accessToken,
+    id_token_claims: parseJwtPayload(idToken),
+    access_token_claims: parseJwtPayload(accessToken),
+  });
 });
 
 // ---------------------------------------------------------------------------

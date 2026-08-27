@@ -41,10 +41,70 @@ export default function DashboardLayout({ children }) {
     }
   }, [router]);
 
+  // Centralized SSO logout detection: poll the auth server every 30s
+  // and clear the local session if the OP reports the central session
+  // is no longer valid. This ensures that a logout from any other
+  // client app / browser tab is reflected here within ~30s.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
+    let cancelled = false;
+    const ping = async () => {
+      const token = localStorage.getItem('admin_token');
+      if (!token) return;
+      try {
+        const res = await fetch(`${authServerUrl}/api/v1/sso/ping`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        if (cancelled) return;
+        if (res.status === 401) {
+          // Central SSO session gone — log this tab out
+          localStorage.removeItem('admin_token');
+          localStorage.removeItem('admin_id_token');
+          localStorage.removeItem('admin_user');
+          router.replace('/?reason=sso_logout');
+        }
+      } catch (_) {
+        // Network blip — ignore, retry on next tick
+      }
+    };
+    const handle = setInterval(ping, 30000);
+    // Also ping immediately on focus
+    const onFocus = () => ping();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [isAuthenticated, router]);
+
   const handleLogout = () => {
+    // OIDC RP-Initiated Logout 1.0 (front-channel).
+    //   1. Clear local session data immediately
+    //   2. Redirect the browser to the OP's /logout endpoint with
+    //      - id_token_hint: the id_token the OP issued to this client
+    //      - client_id: this client's identifier
+    //      - post_logout_redirect_uri: where the OP should send the user back
+    //      - state: optional, echoed back
+    //   The OP will then POST a back-channel logout_token to every other
+    //   client app the user had a session on, then bounce the user back to
+    //   the post_logout_redirect_uri.
+    const idToken = localStorage.getItem('admin_id_token');
+    const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
+    const postLogoutUri = `${window.location.origin}/logged-out`;
+    const params = new URLSearchParams();
+    if (idToken) params.set('id_token_hint', idToken);
+    params.set('client_id', 'auth_management_app');
+    params.set('post_logout_redirect_uri', postLogoutUri);
+
     localStorage.removeItem('admin_token');
+    localStorage.removeItem('admin_id_token');
     localStorage.removeItem('admin_user');
-    router.replace('/');
+
+    // Use a hard navigation so the OP endpoint sets the right cookies/redirects.
+    window.location.href = `${authServerUrl}/logout?${params.toString()}`;
   };
 
   if (isCheckingAuth || !isAuthenticated) {

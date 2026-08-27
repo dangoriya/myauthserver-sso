@@ -2,31 +2,15 @@ import time
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from passlib.context import CryptContext
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import serialization
 from config import settings
+import security
+from security import get_private_pem, get_public_pem, get_kid
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Generate RSA keypair in memory for signing OIDC tokens
-_private_key = rsa.generate_private_key(
-    public_exponent=65537,
-    key_size=2048
-)
-
-_private_pem = _private_key.private_bytes(
-    encoding=serialization.Encoding.PEM,
-    format=serialization.PrivateFormat.PKCS8,
-    encryption_algorithm=serialization.NoEncryption()
-).decode("utf-8")
-
-_public_pem = _private_key.public_key().public_bytes(
-    encoding=serialization.Encoding.PEM,
-    format=serialization.PublicFormat.SubjectPublicKeyInfo
-).decode("utf-8")
-
-# Extract numbers for JWKS
-pub_numbers = _private_key.public_key().public_numbers()
+# Use the persistent keypair for signing OIDC tokens (loaded from security.py)
+_private_pem = get_private_pem()
+_public_pem = get_public_pem()
 
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password[:72])
@@ -37,23 +21,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password[:72], hashed_password)
 
 def get_jwks():
-    import base64
-    def int_to_base64(n):
-        byte_size = (n.bit_length() + 7) // 8
-        return base64.urlsafe_b64encode(n.to_bytes(byte_size, 'big')).rstrip(b'=').decode('utf-8')
-
-    return {
-        "keys": [
-            {
-                "kty": "RSA",
-                "alg": "RS256",
-                "use": "sig",
-                "kid": "myauth-key-1",
-                "n": int_to_base64(pub_numbers.n),
-                "e": int_to_base64(pub_numbers.e)
-            }
-        ]
-    }
+    return security.get_jwks()
 
 import pyotp
 import qrcode
@@ -90,7 +58,7 @@ def verify_totp_code(secret: str, code: str) -> bool:
     totp = pyotp.TOTP(secret)
     return totp.verify(code.strip())
 
-def create_id_token(user_id: str, email: str, name: str, client_id: str, picture: str = None, role: str = "normal-user", is_admin: bool = False) -> str:
+def create_id_token(user_id: str, email: str, name: str, client_id: str, picture: str = None, role: str = "normal-user", is_admin: bool = False, sid: str = None) -> str:
     now = int(time.time())
     payload = {
         "iss": settings.AUTH_SERVER_URL,
@@ -98,6 +66,7 @@ def create_id_token(user_id: str, email: str, name: str, client_id: str, picture
         "aud": client_id,
         "exp": now + 3600,
         "iat": now,
+        "auth_time": now,
         "email": email,
         "name": name or email,
         "picture": picture or "",
@@ -105,9 +74,11 @@ def create_id_token(user_id: str, email: str, name: str, client_id: str, picture
         "roles": [role],
         "is_admin": is_admin
     }
-    return jwt.encode(payload, _private_pem, algorithm="RS256", headers={"kid": "myauth-key-1"})
+    if sid:
+        payload["sid"] = sid
+    return jwt.encode(payload, _private_pem, algorithm="RS256", headers={"kid": get_kid()})
 
-def create_access_token(user_id: str, client_id: str, scope: str = "openid profile email", role: str = "normal-user", is_admin: bool = False) -> str:
+def create_access_token(user_id: str, client_id: str, scope: str = "openid profile email", role: str = "normal-user", is_admin: bool = False, sid: str = None) -> str:
     now = int(time.time())
     payload = {
         "iss": settings.AUTH_SERVER_URL,
@@ -120,7 +91,9 @@ def create_access_token(user_id: str, client_id: str, scope: str = "openid profi
         "exp": now + 3600,
         "iat": now
     }
-    return jwt.encode(payload, _private_pem, algorithm="RS256", headers={"kid": "myauth-key-1"})
+    if sid:
+        payload["sid"] = sid
+    return jwt.encode(payload, _private_pem, algorithm="RS256", headers={"kid": get_kid()})
 
 def create_admin_token(user_id: str, email: str, role: str = "admin") -> str:
     now = int(time.time())

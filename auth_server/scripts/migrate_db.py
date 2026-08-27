@@ -90,14 +90,23 @@ def run_migrations(reset: bool = False):
                 client_secret="test_client_secret_1",
                 client_name="Test App 1",
                 redirect_uris="http://localhost:3001/callback",
+                post_logout_redirect_uris="http://localhost:3001/logged-out",
+                backchannel_logout_uris="http://host.docker.internal:3001/backchannel-logout,http://localhost:3001/backchannel-logout",
+                backchannel_logout_enabled=True,
                 allowed_grant_types="authorization_code",
                 is_sso_enabled=True
             )
             db.add(default_client)
-            print("  ✅ Default Client App created: test_client_id_1 / test_client_secret_1")
+            print(f"  ✅ Default Client App created: test_client_id_1 / test_client_secret_1")
 
         # Seed Auth Server Management Client App
         management_redirect_uri = f"{settings.MANAGEMENT_URL.rstrip('/')}/auth/callback"
+        mgmt_post_logout_uri = f"{settings.MANAGEMENT_URL.rstrip('/')}/logged-out"
+        mgmt_backchannel_uris = (
+            f"{settings.MANAGEMENT_URL.rstrip('/')}/api/backchannel-logout,"
+            f"http://host.docker.internal:3005/api/backchannel-logout,"
+            f"http://auth_server_management:3000/api/backchannel-logout"
+        )
         mgmt_client = db.query(ClientApp).filter(ClientApp.client_id == "auth_management_app").first()
         if not mgmt_client:
             mgmt_client = ClientApp(
@@ -105,11 +114,29 @@ def run_migrations(reset: bool = False):
                 client_secret="auth_management_secret",
                 client_name="Auth Server Management",
                 redirect_uris=f"{management_redirect_uri},{settings.MANAGEMENT_URL.rstrip('/')}",
+                post_logout_redirect_uris=f"{mgmt_post_logout_uri},{settings.MANAGEMENT_URL.rstrip('/')}",
+                backchannel_logout_uris=mgmt_backchannel_uris,
+                backchannel_logout_enabled=True,
                 allowed_grant_types="authorization_code",
                 is_sso_enabled=True
             )
             db.add(mgmt_client)
             print(f"  ✅ Auth Server Management App registered: auth_management_app ({management_redirect_uri})")
+        else:
+            # Update existing client with new fields if missing
+            changed = False
+            if not mgmt_client.post_logout_redirect_uris:
+                mgmt_client.post_logout_redirect_uris = f"{mgmt_post_logout_uri},{settings.MANAGEMENT_URL.rstrip('/')}"
+                changed = True
+            if not mgmt_client.backchannel_logout_uris:
+                mgmt_client.backchannel_logout_uris = mgmt_backchannel_uris
+                changed = True
+            if not mgmt_client.backchannel_logout_session_supported:
+                mgmt_client.backchannel_logout_session_supported = True
+                changed = True
+            if changed:
+                db.commit()
+                print(f"  🔧 Updated Auth Server Management App with OIDC logout config")
 
         db.commit()
         print("🎉 [MIGRATION] Database schema & master data setup completed successfully!")

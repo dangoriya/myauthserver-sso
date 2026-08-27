@@ -12,6 +12,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Persistent RSA key directory for OIDC token signing
+# In Docker, the /app/keys path is mounted as a volume (see docker-compose.yml)
+# so the keypair survives container restarts.
+RUN mkdir -p /app/keys
+ENV IAM_KEY_DIR=/app/keys
+
 EXPOSE 8000
 
 # Container Startup Command

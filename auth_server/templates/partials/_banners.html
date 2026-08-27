@@ -1,0 +1,33 @@
+{# Reusable alert banner. Usage:
+   {% import 'partials/_banners.html' as banners %}
+   {{ banners.error('Invalid credentials') }}
+   {{ banners.info('Code sent to your email') }}
+   {{ banners.warn('This action is permanent') }}
+#}
+{% macro error(msg) -%}
+  <div class="iam-banner iam-banner-error" role="alert">
+    <span aria-hidden="true">⚠️</span>
+    <span>{{ msg }}</span>
+  </div>
+{%- endmacro %}
+
+{% macro info(msg) -%}
+  <div class="iam-banner iam-banner-info" role="status">
+    <span aria-hidden="true">ℹ️</span>
+    <span>{{ msg }}</span>
+  </div>
+{%- endmacro %}
+
+{% macro info_html(msg) -%}
+  <div class="iam-banner iam-banner-info" role="status">
+    <span aria-hidden="true">ℹ️</span>
+    <span>{{ msg|safe }}</span>
+  </div>
+{%- endmacro %}
+
+{% macro warn(msg) -%}
+  <div class="iam-banner iam-banner-warn" role="status">
+    <span aria-hidden="true">⚠️</span>
+    <span>{{ msg }}</span>
+  </div>
+{%- endmacro %}

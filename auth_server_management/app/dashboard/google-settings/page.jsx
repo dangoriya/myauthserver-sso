@@ -15,6 +15,7 @@ export default function GoogleSettingsPage() {
   const [testResult, setTestResult] = useState(null);
   const [testError, setTestError] = useState('');
   const [showTestModal, setShowTestModal] = useState(false);
+  const [requiredRedirectUri, setRequiredRedirectUri] = useState('');
 
   const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
 
@@ -38,15 +39,6 @@ export default function GoogleSettingsPage() {
       }
     };
     fetchSettings();
-
-    // Check if returning from Google test callback
-    if (typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const code = urlParams.get('code');
-      if (code) {
-        handleTestCodeExchange(code);
-      }
-    }
   }, [authServerUrl]);
 
   const handleSave = async (e) => {
@@ -80,12 +72,16 @@ export default function GoogleSettingsPage() {
     setTestResult(null);
 
     const token = localStorage.getItem('admin_token');
-    const currentCallback = window.location.origin + window.location.pathname;
+    // The postback URL is the page we're on. After Google redirects
+    // back to the auth_server, the auth_server will re-redirect here
+    // carrying the authorization `code` as ?test_code=...
+    const postbackUrl = window.location.origin + window.location.pathname;
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/admin/google-test/url?redirect_uri=${encodeURIComponent(currentCallback)}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await fetch(
+        `${authServerUrl}/api/v1/admin/google-test/url?redirect_uri=${encodeURIComponent(postbackUrl)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
 
       if (!res.ok) {
         const errData = await res.json();
@@ -93,6 +89,11 @@ export default function GoogleSettingsPage() {
       }
 
       const data = await res.json();
+      // Show a clear warning if the user hasn't yet registered the
+      // required redirect URI in their Google Cloud Console.
+      if (data.required_redirect_uri) {
+        setRequiredRedirectUri(data.required_redirect_uri);
+      }
       window.location.href = data.auth_url;
     } catch (err) {
       setTestError(err.message);
@@ -104,19 +105,20 @@ export default function GoogleSettingsPage() {
     setTestLoading(true);
     setTestError('');
     const token = localStorage.getItem('admin_token');
-    const currentCallback = window.location.origin + window.location.pathname;
 
     try {
+      // The backend uses the auth_server's registered redirect_uri for
+      // the actual token exchange (matching what was sent to Google).
       const res = await fetch(`${authServerUrl}/api/v1/admin/google-test/exchange`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          code: code,
-          redirect_uri: currentCallback
-        })
+          code,
+          redirect_uri: window.location.origin + window.location.pathname,
+        }),
       });
 
       if (!res.ok) {
@@ -126,7 +128,6 @@ export default function GoogleSettingsPage() {
 
       const data = await res.json();
       setTestResult(data);
-      setShowTestModal(true);
       window.history.replaceState({}, document.title, window.location.pathname);
     } catch (err) {
       setTestError(err.message);
@@ -134,6 +135,24 @@ export default function GoogleSettingsPage() {
       setTestLoading(false);
     }
   };
+
+  // On mount, check for ?test_code=... (auth_server postback) or
+  // ?test_error=... and run the exchange automatically.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const testCode = urlParams.get('test_code');
+    const testError = urlParams.get('test_error');
+    if (testError) {
+      setTestError(decodeURIComponent(testError));
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return;
+    }
+    if (testCode) {
+      handleTestCodeExchange(testCode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="max-w-3xl space-y-8">
@@ -236,6 +255,7 @@ export default function GoogleSettingsPage() {
             {testLoading ? 'Testing...' : '⚡ Test Google Integration'}
           </button>
         </div>
+
       </form>
 
       {/* Test Integration Result — persistent card, stays visible until cleared */}

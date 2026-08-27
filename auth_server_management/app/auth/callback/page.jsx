@@ -74,6 +74,7 @@ export default function AuthCallbackPage() {
         };
 
         localStorage.setItem('admin_token', accessToken);
+        if (idToken) localStorage.setItem('admin_id_token', idToken);
         localStorage.setItem('admin_user', JSON.stringify(userObj));
 
         // Admin users go to system overview dashboard; normal users go directly to their profile page

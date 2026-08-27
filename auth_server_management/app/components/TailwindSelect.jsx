@@ -1,95 +1,138 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { Fragment } from 'react';
+import {
+  Label,
+  Listbox,
+  ListboxButton,
+  ListboxOption,
+  ListboxOptions,
+} from '@headlessui/react';
+import { ChevronUpDownIcon, CheckIcon } from '@heroicons/react/20/solid';
 
 /**
- * TailwindSelect - A custom styled select component matching the TailwindUI/TailwindPlus `el-select` design.
+ * TailwindSelect — custom dark-themed select built on Headless UI's
+ * Listbox. Matches the official Tailwind Plus "Listbox" example
+ * (tailwindcss.com/plus/ui-blocks/application-ui/forms/select-menus)
+ * but with the auth_server's dark/slate theme.
  *
  * Props:
- *   value     - current selected value (string)
- *   onChange  - callback(value: string) when user picks an option
- *   options   - Array of { value: string, label: string }
- *   placeholder - text shown when nothing is selected (default: "Select Option")
- *   className - optional extra class on the wrapper
+ *   value       - currently selected value (string)
+ *   onChange    - callback(value, option) when user picks an option
+ *   options     - Array<{ value: string|number, label: string, [key]: any }>
+ *   placeholder - shown when nothing is selected
+ *   label       - optional <label> rendered above the trigger
+ *   className   - extra class on the outer wrapper
+ *   name        - optional hidden <input> name for form submission
+ *   disabled    - disable interaction
+ *   id          - id attribute (auto-generated if not provided)
  */
-export default function TailwindSelect({ value, onChange, options = [], placeholder = 'Select Option', className = '' }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef(null);
-  const selectedOption = options.find((o) => o.value === value);
+export default function TailwindSelect({
+  value,
+  onChange,
+  options = [],
+  placeholder = 'Select an option',
+  label,
+  className = '',
+  name,
+  disabled = false,
+  id,
+}) {
+  // Headless UI Listbox needs an object, not a primitive value.
+  // We look up the matching option by `.value` and pass the object to
+  // Listbox. The onChange callback emits the whole option object, which
+  // we convert back to its `.value` for the caller.
+  const selected = options.find((o) => o.value === value) ?? null;
+  const listboxId =
+    id || `tailwind-select-${Math.random().toString(36).slice(2, 8)}`;
 
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (containerRef.current && !containerRef.current.contains(event.target)) {
-        setIsOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  const handleChange = (option) => {
+    if (option == null) return;
+    onChange?.(option.value, option);
+  };
 
   return (
-    <div ref={containerRef} className={`relative w-full ${className}`}>
-      {/* Trigger Button */}
-      <button
-        type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
-        className="grid w-full cursor-default grid-cols-1 rounded-xl bg-slate-800/80 py-2.5 pr-2 pl-3.5 text-left text-white border border-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-400/50 text-sm shadow-sm transition hover:border-slate-600"
-      >
-        <span className="col-start-1 row-start-1 flex items-center gap-3 pr-6 truncate text-slate-100">
-          {selectedOption ? selectedOption.label : <span className="text-slate-500">{placeholder}</span>}
-        </span>
-        {/* Chevron up/down icon */}
-        <svg
-          viewBox="0 0 16 16"
-          fill="currentColor"
-          aria-hidden="true"
-          className="col-start-1 row-start-1 size-4 self-center justify-self-end text-slate-400"
-        >
-          <path
-            d="M5.22 10.22a.75.75 0 0 1 1.06 0L8 11.94l1.72-1.72a.75.75 0 1 1 1.06 1.06l-2.25 2.25a.75.75 0 0 1-1.06 0l-2.25-2.25a.75.75 0 0 1 0-1.06ZM10.78 5.78a.75.75 0 0 1-1.06 0L8 4.06 6.28 5.78a.75.75 0 0 1-1.06-1.06l2.25-2.25a.75.75 0 0 1 1.06 0l2.25 2.25a.75.75 0 0 1 0 1.06Z"
-            clipRule="evenodd"
-            fillRule="evenodd"
-          />
-        </svg>
-      </button>
+    <div className={className}>
+      {label && (
+        <Label htmlFor={listboxId} className="block text-sm/6 font-medium text-white mb-1.5">
+          {label}
+        </Label>
+      )}
+      <Listbox value={selected} onChange={handleChange} disabled={disabled}>
+        <div className="relative">
+          <ListboxButton
+            className={`
+              relative w-full cursor-default
+              rounded-md bg-white/5 py-2 pr-10 pl-3
+              text-left text-white text-sm
+              outline-1 -outline-offset-1 outline-white/10
+              focus-visible:outline-2 focus-visible:-outline-offset-2
+              focus-visible:outline-indigo-500
+              transition
+              ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-white/[0.07]'}
+            `}
+          >
+            <span className="block truncate">
+              {selected ? (
+                <span className="text-white">{selected.label}</span>
+              ) : (
+                <span className="text-slate-500">{placeholder}</span>
+              )}
+            </span>
+            <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+              <ChevronUpDownIcon
+                aria-hidden="true"
+                className="size-5 text-slate-400 sm:size-4"
+              />
+            </span>
+          </ListboxButton>
 
-      {/* Dropdown options */}
-      {isOpen && (
-        <div className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-xl bg-slate-800 py-1 text-sm shadow-2xl border border-slate-700 text-slate-200 animate-in fade-in slide-in-from-top-1 duration-100">
-          {options.map((opt) => {
-            const isSelected = opt.value === value;
-            return (
-              <div
-                key={opt.value}
-                onClick={() => {
-                  onChange(opt.value);
-                  setIsOpen(false);
-                }}
-                className={`relative cursor-pointer py-2.5 pr-9 pl-3.5 select-none transition-colors ${
-                  isSelected
-                    ? 'bg-indigo-600/20 text-indigo-300 font-semibold'
-                    : 'hover:bg-indigo-600 hover:text-white'
-                }`}
+          <ListboxOptions
+            transition
+            anchor="bottom start"
+            className={`
+              z-50 mt-1 max-h-56 w-[var(--button-width)] overflow-auto
+              rounded-md bg-slate-800 py-1 text-base
+              outline-1 -outline-offset-1 outline-white/10
+              shadow-2xl shadow-black/40
+              sm:text-sm
+              [--anchor-gap:4px]
+              transition duration-100 ease-in
+              data-leave:transition data-leave:duration-100 data-leave:ease-in
+              data-closed:data-leave:opacity-0
+            `}
+          >
+            {options.length === 0 && (
+              <div className="relative cursor-default select-none py-2 pr-9 pl-3 text-slate-500 italic">
+                No options available
+              </div>
+            )}
+            {options.map((option) => (
+              <ListboxOption
+                key={String(option.value)}
+                value={option}
+                className={`
+                  group relative cursor-default py-2 pr-9 pl-3
+                  text-white select-none
+                  data-focus:bg-indigo-500 data-focus:outline-hidden
+                  data-focus:text-white
+                `}
               >
                 <div className="flex items-center">
-                  <span className="block truncate">{opt.label}</span>
-                </div>
-                {/* Checkmark for selected */}
-                {isSelected && (
-                  <span className="absolute inset-y-0 right-0 flex items-center pr-3 text-indigo-400">
-                    <svg viewBox="0 0 20 20" fill="currentColor" className="size-4">
-                      <path
-                        d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z"
-                        clipRule="evenodd"
-                        fillRule="evenodd"
-                      />
-                    </svg>
+                  <span className="block truncate font-normal group-data-selected:font-semibold">
+                    {option.label}
                   </span>
-                )}
-              </div>
-            );
-          })}
+                </div>
+
+                <span className="absolute inset-y-0 right-0 hidden items-center pr-4 text-indigo-400 group-data-selected:flex group-data-focus:text-white">
+                  <CheckIcon aria-hidden="true" className="size-5" />
+                </span>
+              </ListboxOption>
+            ))}
+          </ListboxOptions>
         </div>
-      )}
+      </Listbox>
+      {/* Hidden input for native form submission */}
+      {name && <input type="hidden" name={name} value={selected?.value ?? ''} />}
     </div>
   );
 }
