@@ -1,0 +1,50 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "permission": {
+    "read": {
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow",
+      "**/secrets/**": "deny",
+      "**/credentials/**": "deny",
+      "**/*.pem": "deny",
+      "**/*.key": "deny",
+      "**/*.crt": "deny",
+      "**/*.pfx": "deny",
+      "**/*.p12": "deny",
+      "**/id_rsa*": "deny",
+      "**/id_dsa*": "deny",
+      "**/id_ecdsa*": "deny",
+      "**/id_ed25519*": "deny",
+      "**/.aws/credentials": "deny",
+      "**/.ssh/**": "deny",
+      "**/.gnupg/**": "deny",
+      "**/.netrc": "deny",
+      "**/.npmrc": "deny",
+      "**/.pypirc": "deny"
+    },
+    "edit": {
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "**/secrets/**": "deny",
+      "**/credentials/**": "deny",
+      "**/*.pem": "deny",
+      "**/*.key": "deny",
+      "**/id_rsa*": "deny",
+      "**/.aws/credentials": "deny",
+      "**/.ssh/**": "deny"
+    },
+    "bash": {
+      "cat *.env*": "deny",
+      "cat **/.env*": "deny",
+      "cat **/secrets/**": "deny",
+      "cat **/credentials/**": "deny",
+      "cat **/*.pem": "deny",
+      "cat **/*.key": "deny",
+      "printenv *SECRET*": "deny",
+      "printenv *PASSWORD*": "deny",
+      "printenv *TOKEN*": "deny",
+      "printenv *KEY*": "deny"
+    }
+  }
+}
