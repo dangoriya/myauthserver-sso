@@ -101,7 +101,12 @@ def run_migrations(reset: bool = False):
 
         # Seed Auth Server Management Client App
         management_redirect_uri = f"{settings.MANAGEMENT_URL.rstrip('/')}/auth/callback"
-        mgmt_post_logout_uri = f"{settings.MANAGEMENT_URL.rstrip('/')}/logged-out"
+        mgmt_post_logout_uri = (
+            f"{settings.MANAGEMENT_URL.rstrip('/')}/logged-out,"
+            f"{settings.MANAGEMENT_URL.rstrip('/')},"
+            f"http://host.docker.internal:3005/logged-out,"
+            f"http://host.docker.internal:3005"
+        )
         mgmt_backchannel_uris = (
             f"{settings.MANAGEMENT_URL.rstrip('/')}/api/backchannel-logout,"
             f"http://host.docker.internal:3005/api/backchannel-logout,"
@@ -114,7 +119,7 @@ def run_migrations(reset: bool = False):
                 client_secret="auth_management_secret",
                 client_name="Auth Server Management",
                 redirect_uris=f"{management_redirect_uri},{settings.MANAGEMENT_URL.rstrip('/')}",
-                post_logout_redirect_uris=f"{mgmt_post_logout_uri},{settings.MANAGEMENT_URL.rstrip('/')}",
+                post_logout_redirect_uris=mgmt_post_logout_uri,
                 backchannel_logout_uris=mgmt_backchannel_uris,
                 backchannel_logout_enabled=True,
                 allowed_grant_types="authorization_code",
@@ -123,20 +128,12 @@ def run_migrations(reset: bool = False):
             db.add(mgmt_client)
             print(f"  ✅ Auth Server Management App registered: auth_management_app ({management_redirect_uri})")
         else:
-            # Update existing client with new fields if missing
-            changed = False
-            if not mgmt_client.post_logout_redirect_uris:
-                mgmt_client.post_logout_redirect_uris = f"{mgmt_post_logout_uri},{settings.MANAGEMENT_URL.rstrip('/')}"
-                changed = True
-            if not mgmt_client.backchannel_logout_uris:
-                mgmt_client.backchannel_logout_uris = mgmt_backchannel_uris
-                changed = True
-            if not mgmt_client.backchannel_logout_session_supported:
-                mgmt_client.backchannel_logout_session_supported = True
-                changed = True
-            if changed:
-                db.commit()
-                print(f"  🔧 Updated Auth Server Management App with OIDC logout config")
+            # Always refresh post_logout and backchannel URIs to pick up new entries
+            mgmt_client.post_logout_redirect_uris = mgmt_post_logout_uri
+            mgmt_client.backchannel_logout_uris = mgmt_backchannel_uris
+            mgmt_client.backchannel_logout_enabled = True
+            db.commit()
+            print(f"  🔧 Updated Auth Server Management App with OIDC logout config")
 
         db.commit()
         print("🎉 [MIGRATION] Database schema & master data setup completed successfully!")

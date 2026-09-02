@@ -1,33 +1,28 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { Users, ShieldCheck, AppWindow, Lock, Globe } from 'lucide-react';
+import { fetchAuthed, getStoredUser } from '@/app/lib/auth';
+
 export default function DashboardPage() {
   const [stats, setStats] = useState({ users: 0, clients: 0, roles: 0, googleEnabled: false, enforce2FA: false });
 
   useEffect(() => {
-    const userStr = localStorage.getItem('admin_user');
-    if (userStr) {
-      try {
-        const userObj = JSON.parse(userStr);
-        const isAdmin = userObj?.is_admin || userObj?.role === 'admin';
-        if (!isAdmin) {
-          window.location.replace('/dashboard/profile');
-          return;
-        }
-      } catch (e) {
-        console.error(e);
+    const userObj = getStoredUser();
+    if (userObj) {
+      const isAdmin = userObj?.is_admin || userObj?.role === 'admin';
+      if (!isAdmin) {
+        window.location.replace('/dashboard/profile');
+        return;
       }
     }
 
     const fetchData = async () => {
-      const token = localStorage.getItem('admin_token');
-      const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
       try {
         const [usersRes, clientsRes, rolesRes, googleRes] = await Promise.all([
-          fetch(`${authServerUrl}/api/v1/admin/users`, { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(`${authServerUrl}/api/v1/admin/clients`, { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(`${authServerUrl}/api/v1/admin/roles`, { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(`${authServerUrl}/api/v1/admin/google-settings`, { headers: { Authorization: `Bearer ${token}` } })
+          fetchAuthed('/api/v1/admin/users'),
+          fetchAuthed('/api/v1/admin/clients'),
+          fetchAuthed('/api/v1/admin/roles'),
+          fetchAuthed('/api/v1/admin/google-settings')
         ]);
 
         const users = usersRes.ok ? await usersRes.json() : [];

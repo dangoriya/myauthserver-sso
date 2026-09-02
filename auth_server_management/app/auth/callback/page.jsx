@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { setSession, setStoredUser } from '@/app/lib/auth';
 
 export default function AuthCallbackPage() {
   const router = useRouter();
@@ -53,6 +54,8 @@ export default function AuthCallbackPage() {
         const data = await res.json();
         const accessToken = data.access_token;
         const idToken = data.id_token;
+        const refreshToken = data.refresh_token;
+        const expiresIn = data.expires_in || 900;
 
         // Parse JWT payload to extract role & attributes
         let userPayload = {};
@@ -73,9 +76,15 @@ export default function AuthCallbackPage() {
           provider: 'google'
         };
 
-        localStorage.setItem('admin_token', accessToken);
-        if (idToken) localStorage.setItem('admin_id_token', idToken);
-        localStorage.setItem('admin_user', JSON.stringify(userObj));
+        // Store sensitive tokens in HttpOnly cookies via Next.js server route
+        await setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+          expires_in: expiresIn,
+        });
+
+        // Store non-sensitive display data in localStorage for UI
+        setStoredUser(userObj);
 
         // Admin users go to system overview dashboard; normal users go directly to their profile page
         if (userObj.is_admin || userObj.role === 'admin') {

@@ -40,6 +40,11 @@ from config import settings
 from security import get_kid, get_private_pem
 from models import ClientApp, User
 from redis_client import set_cache, get_cache, delete_cache
+from token_store import (
+    delete_sso_session,
+    revoke_all_user_refresh_tokens,
+    revoke_refresh_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,33 +53,8 @@ logger = logging.getLogger(__name__)
 # Each entry is created when a client completes an OIDC login. On logout
 # we read this index to know which clients to notify.
 _USER_SESSIONS_KEY = "user_sessions:{user_id}"
-_JTI_KEY = "logout_jti:{jti}"
-_JTI_TTL = 600  # 10 minutes — used to deduplicate logout_token replays
 _BCTX_RETRIES = 2
 _BCTX_TIMEOUT = 5.0
-
-
-def _rewrite_host_for_backchannel(uri: str) -> str:
-    """When the OP runs inside Docker it cannot reach `localhost` on the
-    host (only on the OP's own container). Replace loopback hosts with
-    the configured CLIENT_CALLBACK_BASE_URL host so back-channel POSTs
-    actually arrive at the client app.
-
-    This is a no-op for URIs that already use a non-loopback hostname.
-    """
-    if not uri:
-        return uri
-    base = (settings.CLIENT_CALLBACK_BASE_URL or "").rstrip("/")
-    if not base:
-        return uri
-    parsed = urlparse(uri)
-    if parsed.hostname not in ("localhost", "127.0.0.1", "0.0.0.0"):
-        return uri
-    base_parsed = urlparse(base)
-    new_netloc = parsed.netloc.replace(parsed.hostname, base_parsed.hostname, 1)
-    if base_parsed.port and ":" not in new_netloc.split("@")[-1]:
-        new_netloc = f"{new_netloc.split(':')[0]}:{base_parsed.port}"
-    return urlunparse(parsed._replace(netloc=new_netloc))
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +128,6 @@ def build_logout_token(client_id: str, sub: str, sid: Optional[str] = None) -> t
 
     token = jwt.encode(payload, get_private_pem(), algorithm="RS256",
                        headers={"kid": get_kid()})
-    set_cache(_JTI_KEY.format(jti=jti), {"sub": sub, "client_id": client_id, "exp": now + _JTI_TTL},
-              ttl=_JTI_TTL)
     return token, jti
 
 
@@ -159,6 +137,10 @@ def build_logout_token(client_id: str, sub: str, sid: Optional[str] = None) -> t
 def _post_logout(client: ClientApp, logout_token: str) -> tuple[bool, Optional[str]]:
     """POST a logout_token to one of the client's backchannel_logout_uris.
 
+    Per OIDC Back-Channel Logout 1.0 §2.2:
+      "The POST entity body MUST be application/x-www-form-urlencoded
+       and the logout_token parameter MUST be set to the logout token."
+
     Returns (success, error_message).
     """
     uris = [u.strip() for u in (client.backchannel_logout_uris or "").split(",") if u.strip()]
@@ -166,14 +148,14 @@ def _post_logout(client: ClientApp, logout_token: str) -> tuple[bool, Optional[s
         return False, "no backchannel_logout_uris registered"
 
     last_err = None
-    for raw_uri in uris:
-        uri = _rewrite_host_for_backchannel(raw_uri)
+    for uri in uris:
         for attempt in range(1, _BCTX_RETRIES + 1):
             try:
                 with httpx.Client(timeout=_BCTX_TIMEOUT) as hx:
                     res = hx.post(
                         uri,
-                        content=logout_token,
+                        # Form-encoded body per OIDC spec
+                        data={"logout_token": logout_token},
                         headers={
                             "Content-Type": "application/x-www-form-urlencoded",
                             "Accept": "application/json",
@@ -227,13 +209,17 @@ def notify_clients_backchannel(user_id: str, current_client_id: Optional[str] = 
 # Front-channel RP-initiated logout helpers
 # ---------------------------------------------------------------------------
 def is_valid_post_logout_uri(client: ClientApp, post_logout_redirect_uri: str) -> bool:
-    """Return True if post_logout_redirect_uri is registered for this client."""
+    """Return True if post_logout_redirect_uri is registered for this client.
+
+    Comparison is trailing-slash tolerant so that http://example.com/ matches
+    a registered http://example.com (and vice-versa).
+    """
     if not post_logout_redirect_uri:
         return False
-    uris = [u.strip() for u in (client.post_logout_redirect_uris or "").split(",") if u.strip()]
+    uris = [u.strip().rstrip('/') for u in (client.post_logout_redirect_uris or "").split(",") if u.strip()]
     if not uris:
         return False
-    return post_logout_redirect_uri in uris
+    return post_logout_redirect_uri.rstrip('/') in uris
 
 
 # ---------------------------------------------------------------------------
@@ -263,14 +249,51 @@ def perform_centralized_logout(
             summary["sso_session_terminated"] = True
 
     if user_id:
+        # Revoke every refresh token for this user. Once these are gone,
+        # no client app can mint a new access token — they are all forced
+        # to re-authenticate. This is the *primary* enforcement mechanism
+        # for single logout.
+        summary["refresh_tokens_revoked"] = revoke_all_user_refresh_tokens(user_id)
+
+        # Best-effort back-channel logout. If `db` is None (called from
+        # the JSON /sso/logout endpoint), we still send the logout_token
+        # to the clients we have registered in the in-memory user_sessions
+        # index — we just can't enrich the result with client names.
         sessions = get_user_clients(user_id)
-        # Don't notify the originating client — they're handling the
-        # end of their own session via the front-channel redirect.
         if originating_client_id and originating_client_id in sessions:
             del sessions[originating_client_id]
         if sessions:
-            summary["backchannel_results"] = notify_clients_backchannel(user_id, db=db)
-        # Always clear the user_sessions index entry as well
+            if db is not None:
+                summary["backchannel_results"] = notify_clients_backchannel(user_id, db=db)
+            else:
+                # No DB available: still fire the POSTs but without client
+                # names. notify_clients_backchannel handles db=None by
+                # looking up clients via a simple in-memory dict fallback.
+                summary["backchannel_results"] = _notify_backchannel_no_db(user_id, sessions)
         clear_user_session(user_id)
 
     return summary
+
+
+def _notify_backchannel_no_db(user_id: str, sessions: dict) -> dict:
+    """Fire back-channel logout when we don't have a DB session (e.g. the
+    JSON /sso/logout endpoint was called from a client SPA that doesn't
+    share our SQLAlchemy session). We re-fetch each client from the DB
+    on the fly by creating a short-lived session.
+    """
+    from database import SessionLocal
+    from models import ClientApp
+    results = {}
+    db = SessionLocal()
+    try:
+        for client_id in list(sessions.keys()):
+            client = db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
+            if not client:
+                results[client_id] = {"ok": False, "error": "client not found"}
+                continue
+            token, _ = build_logout_token(client_id, user_id, sessions.get(client_id))
+            ok, err = _post_logout(client, token)
+            results[client_id] = {"ok": ok, "error": err}
+    finally:
+        db.close()
+    return results

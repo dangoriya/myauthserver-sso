@@ -68,7 +68,7 @@ services:
       - SMTP_HOST=${SMTP_HOST:-smtp-relay.brevo.com}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-b5f8a3001@smtp-brevo.com}
-      - SMTP_PASSWORD=${SMTP_PASSWORD:-bskt5A50grHBp1D}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
       - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
       - BREVO_API_KEY=${BREVO_API_KEY:-}
       - EMAIL_FROM=${EMAIL_FROM:-dilipdangoriya@gmail.com}
@@ -94,7 +94,15 @@ services:
     ports:
       - "3005:3000"
     environment:
+      # Browser-facing URL (public).
       - NEXT_PUBLIC_AUTH_SERVER_URL=${AUTH_SERVER_URL:-http://localhost:8000}
+      # Server-side URL: used by Next.js route handlers (e.g. back-channel
+      # logout) to fetch the JWKS from inside the Docker network. Must be
+      # the Docker service name, NOT localhost.
+      - AUTH_SERVER_INTERNAL_URL=http://auth_server:8000
+      # Issuer claim the auth server puts in its tokens (must match exactly
+      # the `iss` value used by the OP).
+      - AUTH_SERVER_ISSUER=${AUTH_SERVER_URL:-http://localhost:8000}
     depends_on:
       - auth_server
     extra_hosts:

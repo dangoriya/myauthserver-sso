@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, status, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from sqlalchemy.orm import Session
@@ -30,7 +31,8 @@ def verify_token(request: Request, authorization: Optional[str] = Header(None)):
     # Fallback to SSO Session Cookie if token header not sent
     sso_session_id = request.cookies.get("sso_session")
     if sso_session_id:
-        session_data = get_cache(f"sso_session:{sso_session_id}")
+        from token_store import get_sso_session
+        session_data = get_sso_session(sso_session_id)
         if session_data and session_data.get("user_id"):
             return {"sub": session_data["user_id"], "email": session_data.get("email")}
 
@@ -38,23 +40,67 @@ def verify_token(request: Request, authorization: Optional[str] = Header(None)):
 
 
 # ---------------------------------------------------------------------------
-# Lightweight SSO session ping — used by client apps (e.g. management
-# portal) to detect that the central SSO session has been terminated
-# and trigger a local logout in any other open browser tabs.
+# Lightweight SSO session ping — used by client apps to detect that the
+# central SSO session has been terminated. Returns 200 if the access
+# token is still valid; 401 otherwise. This is a thin alias for
+# /oauth/session/active kept for backwards compatibility.
 # ---------------------------------------------------------------------------
 @router.get("/sso/ping")
 def sso_ping(payload=Depends(verify_token)):
-    """Returns 200 if the bearer token / sso_session cookie is still valid.
-
-    Client apps poll this every ~30s. If it returns 401, the central SSO
-    session has been terminated and the app should clear its local session
-    state immediately.
-    """
     return {
         "ok": True,
         "user_id": payload.get("sub"),
         "role": payload.get("role"),
     }
+
+
+# ---------------------------------------------------------------------------
+# Logout endpoint for client apps (browsers cannot call the OIDC
+# /logout endpoint with a Bearer token; they need a session-based one).
+#
+# POST /api/v1/sso/logout
+#   body: { user_id?: string }   (admin can log out a specific user)
+#   auth: Bearer access token OR sso_session cookie
+#
+# What it does:
+#   1. Revoke every refresh token for the user (so all clients will
+#      fail to refresh their access token and must re-authenticate).
+#   2. Delete the central SSO session entry.
+#   3. Fire OIDC Back-Channel Logout 1.0 to every registered client.
+#   4. Return 200.
+# ---------------------------------------------------------------------------
+class SSOLogoutSchema(BaseModel):
+    user_id: Optional[str] = None
+
+
+@router.post("/sso/logout")
+def sso_logout(request: Request, data: SSOLogoutSchema, payload=Depends(verify_token)):
+    from logout import perform_centralized_logout
+
+    target = data.user_id or payload.get("sub")
+    is_admin = payload.get("role") == "admin" or payload.get("is_admin")
+    if data.user_id and data.user_id != payload.get("sub") and not is_admin:
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+
+    sso_session_id = request.cookies.get("sso_session")
+    summary = perform_centralized_logout(
+        request=request,
+        db=None,
+        user_id=target,
+        sso_session_id=sso_session_id,
+        originating_client_id=payload.get("client_id") or payload.get("aud"),
+    )
+
+    resp = JSONResponse({
+        "ok": True,
+        "user_id": target,
+        "summary": summary,
+    })
+    # Always clear the sso_session cookie on the calling browser
+    if sso_session_id:
+        resp.delete_cookie("sso_session", path="/")
+    resp.delete_cookie("iam_csrf", path="/")
+    return resp
 
 
 def verify_admin(payload=Depends(verify_token)):
@@ -460,6 +506,33 @@ def get_profile(db: Session = Depends(get_db), current_user=Depends(verify_token
         "enforce_2fa_all": enforce_2fa,
         "has_2fa_configured": bool(user.totp_secret),
         "created_at": user.created_at
+    }
+
+class SelfProfileUpdateSchema(BaseModel):
+    name: Optional[str] = None
+    picture: Optional[str] = None
+
+@router.put("/user/profile")
+def update_own_profile(data: SelfProfileUpdateSchema, db: Session = Depends(get_db), current_user=Depends(verify_token)):
+    user = db.query(User).filter(User.id == current_user["sub"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if data.name is not None:
+        if not data.name.strip():
+            raise HTTPException(status_code=400, detail="Name cannot be empty")
+        user.name = data.name.strip()
+    if data.picture is not None:
+        if data.picture != "" and not (data.picture.startswith("http://") or data.picture.startswith("https://") or data.picture.startswith("/")):
+            raise HTTPException(status_code=400, detail="Picture must be a valid URL or empty")
+        user.picture = data.picture
+
+    db.commit()
+    db.refresh(user)
+    return {
+        "message": "Profile updated successfully",
+        "name": user.name,
+        "picture": user.picture
     }
 
 # --- Password Management APIs ---

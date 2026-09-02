@@ -59,9 +59,6 @@ class ClientApp(Base):
     # logout_token to all backchannel_logout_uris of clients whose user
     # had an active session on this client. Required for true SLO.
     backchannel_logout_enabled = Column(Boolean, default=False)
-    # If True, the OP will also include `sid` (session id) in the
-    # logout_token in addition to `sub`. We always include sid.
-    backchannel_logout_session_supported = Column(Boolean, default=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 

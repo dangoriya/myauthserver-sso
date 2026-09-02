@@ -5,7 +5,10 @@ const crypto = require('crypto');
 
 const app = express();
 app.use(cookieParser());
-app.use(express.urlencoded({ extended: true }));
+// IMPORTANT: do NOT register express.urlencoded() globally — it would
+// consume the body of back-channel logout POSTs (which are raw JWT
+// strings, not URL-encoded forms) and leave req.body as an empty
+// object. Back-channel routes read the body themselves via express.text().
 
 const AUTH_SERVER_URL = process.env.AUTH_SERVER_URL || 'http://localhost:8000';
 // When this app runs inside Docker it needs to talk to the auth_server
@@ -372,7 +375,7 @@ app.get('/callback', async (req, res) => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     });
 
-    const { access_token, id_token } = tokenRes.data;
+    const { access_token, id_token, refresh_token, expires_in } = tokenRes.data;
 
     // Fetch user profile from /userinfo
     const userRes = await axios.get(`${INTERNAL_AUTH_SERVER_URL}/userinfo`, {
@@ -395,9 +398,14 @@ app.get('/callback', async (req, res) => {
       sid:      idPayload.sid || '',
     };
 
-    res.cookie('app_session', access_token, { httpOnly: true, maxAge: 3600 * 1000 });
-    res.cookie('app_id_token', id_token, { httpOnly: true, maxAge: 3600 * 1000 });
-    res.cookie('app_user', JSON.stringify(userObj), { httpOnly: true, maxAge: 3600 * 1000 });
+    // Cookie max-age = access-token lifetime (15 min). The refresh
+    // token is HttpOnly + SameSite=Strict and is what we use to mint
+    // new access tokens when the access one expires.
+    const accessTtlMs = (expires_in || 900) * 1000;
+    res.cookie('app_session', access_token, { httpOnly: true, sameSite: 'lax', maxAge: accessTtlMs });
+    res.cookie('app_id_token', id_token, { httpOnly: true, sameSite: 'lax', maxAge: accessTtlMs });
+    res.cookie('app_refresh_token', refresh_token, { httpOnly: true, sameSite: 'lax', maxAge: 7 * 24 * 60 * 60 * 1000 });
+    res.cookie('app_user', JSON.stringify(userObj), { httpOnly: true, sameSite: 'lax', maxAge: accessTtlMs });
     res.redirect('/');
   } catch (err) {
     console.error('Code exchange error:', err.response?.data || err.message);
@@ -425,9 +433,11 @@ function rememberJti(jti, exp) {
   }
 }
 
-app.post('/backchannel-logout', express.text({ type: '*/*' }), async (req, res) => {
+// Per OIDC Back-Channel Logout 1.0 §2.2 the body is
+// application/x-www-form-urlencoded with a `logout_token` field.
+app.post('/backchannel-logout', express.urlencoded({ extended: false }), async (req, res) => {
   try {
-    const logoutToken = (req.body || '').toString();
+    const logoutToken = (req.body && req.body.logout_token) || '';
     if (!logoutToken) {
       return res.status(400).json({ error: 'invalid_request' });
     }
@@ -463,12 +473,14 @@ app.post('/backchannel-logout', express.text({ type: '*/*' }), async (req, res) 
       return res.status(400).json({ error: 'invalid_token', reason: 'missing events claim' });
     }
 
-    // Invalidate local session. We could match by `sid` if we stored it
-    // alongside the session; for now we wipe any app_session/app_user
-    // for this user. In a real multi-session browser you'd key by sid.
+    // Invalidate local session. The auth server has already revoked
+    // this user's refresh tokens (see auth_server/logout.py), so even
+    // if a malicious actor copies these cookies they cannot mint a
+    // new access token.
     console.log(`[backchannel-logout] user=${payload.sub} sid=${payload.sid} → clearing local session`);
     res.clearCookie('app_session');
     res.clearCookie('app_id_token');
+    res.clearCookie('app_refresh_token');
     res.clearCookie('app_user');
     return res.status(200).json({ ok: true });
   } catch (err) {
@@ -504,6 +516,7 @@ app.get('/logout', (req, res) => {
   // Clear local cookies immediately
   res.clearCookie('app_session');
   res.clearCookie('app_id_token');
+  res.clearCookie('app_refresh_token');
   res.clearCookie('app_user');
   res.clearCookie('oauth_state');
 

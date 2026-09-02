@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import TailwindCheckbox from '@/app/components/TailwindCheckbox';
+import { fetchAuthed } from '@/app/lib/auth';
 
 export default function GoogleSettingsPage() {
   const [clientId, setClientId] = useState('');
@@ -17,15 +18,10 @@ export default function GoogleSettingsPage() {
   const [showTestModal, setShowTestModal] = useState(false);
   const [requiredRedirectUri, setRequiredRedirectUri] = useState('');
 
-  const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
-
   useEffect(() => {
     const fetchSettings = async () => {
-      const token = localStorage.getItem('admin_token');
       try {
-        const res = await fetch(`${authServerUrl}/api/v1/admin/google-settings`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const res = await fetchAuthed('/api/v1/admin/google-settings');
         if (res.ok) {
           const data = await res.json();
           setClientId(data.client_id || '');
@@ -39,19 +35,15 @@ export default function GoogleSettingsPage() {
       }
     };
     fetchSettings();
-  }, [authServerUrl]);
+  }, []);
 
   const handleSave = async (e) => {
     e.preventDefault();
     setMessage('');
-    const token = localStorage.getItem('admin_token');
 
-    const res = await fetch(`${authServerUrl}/api/v1/admin/google-settings`, {
+    const res = await fetchAuthed('/api/v1/admin/google-settings', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         client_id: clientId,
         client_secret: clientSecret,
@@ -71,16 +63,11 @@ export default function GoogleSettingsPage() {
     setTestError('');
     setTestResult(null);
 
-    const token = localStorage.getItem('admin_token');
-    // The postback URL is the page we're on. After Google redirects
-    // back to the auth_server, the auth_server will re-redirect here
-    // carrying the authorization `code` as ?test_code=...
     const postbackUrl = window.location.origin + window.location.pathname;
 
     try {
-      const res = await fetch(
-        `${authServerUrl}/api/v1/admin/google-test/url?redirect_uri=${encodeURIComponent(postbackUrl)}`,
-        { headers: { Authorization: `Bearer ${token}` } },
+      const res = await fetchAuthed(
+        `/api/v1/admin/google-test/url?redirect_uri=${encodeURIComponent(postbackUrl)}`
       );
 
       if (!res.ok) {
@@ -89,8 +76,6 @@ export default function GoogleSettingsPage() {
       }
 
       const data = await res.json();
-      // Show a clear warning if the user hasn't yet registered the
-      // required redirect URI in their Google Cloud Console.
       if (data.required_redirect_uri) {
         setRequiredRedirectUri(data.required_redirect_uri);
       }
@@ -104,17 +89,11 @@ export default function GoogleSettingsPage() {
   const handleTestCodeExchange = async (code) => {
     setTestLoading(true);
     setTestError('');
-    const token = localStorage.getItem('admin_token');
 
     try {
-      // The backend uses the auth_server's registered redirect_uri for
-      // the actual token exchange (matching what was sent to Google).
-      const res = await fetch(`${authServerUrl}/api/v1/admin/google-test/exchange`, {
+      const res = await fetchAuthed('/api/v1/admin/google-test/exchange', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code,
           redirect_uri: window.location.origin + window.location.pathname,

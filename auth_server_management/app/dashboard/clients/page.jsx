@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import TailwindCheckbox from '@/app/components/TailwindCheckbox';
+import { fetchAuthed } from '@/app/lib/auth';
 
 export default function ClientAppsPage() {
   const [clients, setClients] = useState([]);
@@ -10,12 +11,8 @@ export default function ClientAppsPage() {
   const [isSsoEnabled, setIsSsoEnabled] = useState(true);
 
   const fetchClients = async () => {
-    const token = localStorage.getItem('admin_token');
-    const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/admin/clients`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await fetchAuthed('/api/v1/admin/clients');
       if (res.ok) setClients(await res.json());
     } catch (err) {
       console.error(err);
@@ -28,15 +25,9 @@ export default function ClientAppsPage() {
 
   const handleCreateClient = async (e) => {
     e.preventDefault();
-    const token = localStorage.getItem('admin_token');
-    const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
-
-    await fetch(`${authServerUrl}/api/v1/admin/clients`, {
+    await fetchAuthed('/api/v1/admin/clients', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         client_name: clientName,
         redirect_uris: redirectUris,
@@ -53,12 +44,8 @@ export default function ClientAppsPage() {
 
   const handleDeleteClient = async (clientId) => {
     if (!confirm('Are you sure you want to delete this app registration?')) return;
-    const token = localStorage.getItem('admin_token');
-    const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
-
-    await fetch(`${authServerUrl}/api/v1/admin/clients/${clientId}`, {
+    await fetchAuthed(`/api/v1/admin/clients/${clientId}`, {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
     });
     fetchClients();
   };

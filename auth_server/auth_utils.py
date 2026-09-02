@@ -5,6 +5,7 @@ from passlib.context import CryptContext
 from config import settings
 import security
 from security import get_private_pem, get_public_pem, get_kid
+from token_store import ACCESS_TOKEN_TTL
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -13,12 +14,15 @@ _private_pem = get_private_pem()
 _public_pem = get_public_pem()
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password[:72])
+    # Safely encode password bytes for bcrypt (72-byte max for bcrypt)
+    pwd_bytes = password.encode("utf-8")[:72]
+    return pwd_context.hash(pwd_bytes)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     if not hashed_password:
         return False
-    return pwd_context.verify(plain_password[:72], hashed_password)
+    pwd_bytes = plain_password.encode("utf-8")[:72]
+    return pwd_context.verify(pwd_bytes, hashed_password)
 
 def get_jwks():
     return security.get_jwks()
@@ -64,7 +68,7 @@ def create_id_token(user_id: str, email: str, name: str, client_id: str, picture
         "iss": settings.AUTH_SERVER_URL,
         "sub": user_id,
         "aud": client_id,
-        "exp": now + 3600,
+        "exp": now + ACCESS_TOKEN_TTL,
         "iat": now,
         "auth_time": now,
         "email": email,
@@ -88,7 +92,7 @@ def create_access_token(user_id: str, client_id: str, scope: str = "openid profi
         "role": role,
         "roles": [role],
         "is_admin": is_admin,
-        "exp": now + 3600,
+        "exp": now + ACCESS_TOKEN_TTL,
         "iat": now
     }
     if sid:
@@ -107,23 +111,12 @@ def create_admin_token(user_id: str, email: str, role: str = "admin") -> str:
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
 
-def decode_token(token: str, is_admin: bool = False):
-    """
-    Decodes JWT token supporting both RS256 (OIDC Access/ID Tokens) and HS256 (IAM Local Session Tokens).
-    """
+def decode_token(token: str):
+    """Decode a RS256-signed access/id token. Returns None on any failure."""
     if not token:
         return None
-    # 1. Try RS256 (OIDC standard)
     try:
-        return jwt.decode(token, _public_pem, algorithms=["RS256"], options={"verify_aud": False})
-    except Exception:
-        pass
-
-    # 2. Try HS256 (Local IAM session)
-    try:
-        return jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"], options={"verify_aud": False})
-    except Exception:
-        pass
-
-    return None
+        return jwt.decode(token, _public_pem, algorithms=["RS256"])
+    except JWTError:
+        return None
 

@@ -1,19 +1,14 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { clearSession } from '@/app/lib/auth';
 
 export default function LoggedOutPage() {
   const [state, setState] = useState('');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    // Clear any remaining local session artifacts
-    try {
-      localStorage.removeItem('admin_token');
-      localStorage.removeItem('admin_id_token');
-      localStorage.removeItem('admin_user');
-    } catch (_) {}
-
+    clearSession();
     const params = new URLSearchParams(window.location.search);
     setState(params.get('state') || '');
   }, []);

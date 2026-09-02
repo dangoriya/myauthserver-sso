@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { fetchAuthed } from '@/app/lib/auth';
 
 export default function RolesManagementPage() {
   const [roles, setRoles] = useState([]);
@@ -14,14 +15,9 @@ export default function RolesManagementPage() {
   const [roleToDelete, setRoleToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
-
   const fetchRoles = async () => {
-    const token = localStorage.getItem('admin_token');
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/admin/roles`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await fetchAuthed('/api/v1/admin/roles');
       if (res.ok) setRoles(await res.json());
     } catch (err) {
       console.error(err);
@@ -35,18 +31,14 @@ export default function RolesManagementPage() {
   const handleCreateRole = async (e) => {
     e.preventDefault();
     setError('');
-    const token = localStorage.getItem('admin_token');
 
     // Automatically calculate sort order (auto increment)
     const nextSortOrder = roles.length > 0 ? Math.max(...roles.map(r => r.sort_order || 0)) + 1 : 1;
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/admin/roles`, {
+      const res = await fetchAuthed('/api/v1/admin/roles', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: name.trim().toLowerCase().replace(/\s+/g, '-'),
           label: label.trim(),
@@ -77,11 +69,9 @@ export default function RolesManagementPage() {
   const handleExecuteDeleteRole = async () => {
     if (!roleToDelete) return;
     setIsDeleting(true);
-    const token = localStorage.getItem('admin_token');
     try {
-      await fetch(`${authServerUrl}/api/v1/admin/roles/${roleToDelete.id}`, {
+      await fetchAuthed(`/api/v1/admin/roles/${roleToDelete.id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
       });
       setRoleToDelete(null);
       fetchRoles();

@@ -22,10 +22,6 @@ class Settings(BaseSettings):
     CENTRAL_DASHBOARD_URL: str = "http://localhost:3005"
     SUCCESSFUL_SIGNUP_REDIRECT_URL: str = "http://localhost:3005"
     LOGOUT_REDIRECT_URL: str = "http://localhost:3005"
-    # Base URL the OP rewrites to when calling loopback client URIs for
-    # OIDC Back-Channel Logout. Set to e.g. http://host.docker.internal
-    # in containerised setups so the OP can reach apps on the Docker host.
-    CLIENT_CALLBACK_BASE_URL: str = ""
 
     # Email Service Settings (SMTP or Brevo API)
     EMAIL_PROVIDER: str = "smtp"  # "smtp" or "brevo_api"

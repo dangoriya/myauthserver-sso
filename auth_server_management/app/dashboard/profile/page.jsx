@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { fetchAuthed } from '@/app/lib/auth';
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState(null);
@@ -53,15 +54,10 @@ export default function ProfilePage() {
   const [unlinkMsg, setUnlinkMsg] = useState('');
   const [unlinkErr, setUnlinkErr] = useState('');
 
-  const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
-
   const fetchProfile = async () => {
     setLoading(true);
-    const token = localStorage.getItem('admin_token');
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/user/profile`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await fetchAuthed('/api/v1/user/profile');
       if (res.ok) {
         const data = await res.json();
         setProfile(data);
@@ -84,14 +80,12 @@ export default function ProfilePage() {
     setProfileMsg('');
     setProfileErr('');
     setUpdatingProfile(true);
-    const token = localStorage.getItem('admin_token');
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/admin/users/${profile.id}`, {
+      const res = await fetchAuthed(`/api/v1/user/profile`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({ name, picture })
       });
@@ -128,14 +122,12 @@ export default function ProfilePage() {
     }
 
     setPwdLoading(true);
-    const token = localStorage.getItem('admin_token');
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/user/set-password`, {
+      const res = await fetchAuthed('/api/v1/user/set-password', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({ new_password: setPwdNew })
       });
@@ -162,14 +154,12 @@ export default function ProfilePage() {
     setPwdMsg('');
     setPwdErr('');
     setPwdLoading(true);
-    const token = localStorage.getItem('admin_token');
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/user/password-reset/verify-old-password`, {
+      const res = await fetchAuthed('/api/v1/user/password-reset/verify-old-password', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({ old_password: oldPassword })
       });
@@ -180,9 +170,8 @@ export default function ProfilePage() {
       }
 
       // Automatically trigger sending the Email OTP
-      const otpRes = await fetch(`${authServerUrl}/api/v1/user/password-reset/request-otp`, {
+      const otpRes = await fetchAuthed('/api/v1/user/password-reset/request-otp', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
       });
 
       if (!otpRes.ok) {
@@ -230,14 +219,12 @@ export default function ProfilePage() {
     }
 
     setPwdLoading(true);
-    const token = localStorage.getItem('admin_token');
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/user/password-reset/confirm-otp`, {
+      const res = await fetchAuthed('/api/v1/user/password-reset/confirm-otp', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
           otp_code: pwdOtpCode,
@@ -269,12 +256,10 @@ export default function ProfilePage() {
   const handleSetup2FA = async () => {
     setTwoFAErr('');
     setTwoFAMsg('');
-    const token = localStorage.getItem('admin_token');
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/user/2fa/setup-qr`, {
+      const res = await fetchAuthed('/api/v1/user/2fa/setup-qr', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
         setQrCodeData(await res.json());
@@ -291,14 +276,12 @@ export default function ProfilePage() {
     e.preventDefault();
     setTwoFAErr('');
     setTwoFAMsg('');
-    const token = localStorage.getItem('admin_token');
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/user/2fa/verify-and-enable`, {
+      const res = await fetchAuthed('/api/v1/user/2fa/verify-and-enable', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({ totp_code: totpCode })
       });
@@ -323,12 +306,10 @@ export default function ProfilePage() {
     setTwoFAErr('');
     setTwoFAMsg('');
     setDisable2FAOtpLoading(true);
-    const token = localStorage.getItem('admin_token');
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/user/2fa/disable-request-otp`, {
+      const res = await fetchAuthed('/api/v1/user/2fa/disable-request-otp', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
       });
 
       if (!res.ok) {
@@ -351,14 +332,12 @@ export default function ProfilePage() {
     setTwoFAErr('');
     setTwoFAMsg('');
     setDisable2FAOtpLoading(true);
-    const token = localStorage.getItem('admin_token');
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/user/2fa/disable-confirm-otp`, {
+      const res = await fetchAuthed('/api/v1/user/2fa/disable-confirm-otp', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({ otp_code: disable2FAOtpCode })
       });
@@ -384,12 +363,10 @@ export default function ProfilePage() {
     setTwoFAErr('');
     setTwoFAMsg('');
     setResetOtpLoading(true);
-    const token = localStorage.getItem('admin_token');
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/user/2fa/reset-request-otp`, {
+      const res = await fetchAuthed('/api/v1/user/2fa/reset-request-otp', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
       });
 
       if (!res.ok) {
@@ -413,14 +390,12 @@ export default function ProfilePage() {
     setTwoFAErr('');
     setTwoFAMsg('');
     setResetOtpLoading(true);
-    const token = localStorage.getItem('admin_token');
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/user/2fa/reset-confirm-otp`, {
+      const res = await fetchAuthed('/api/v1/user/2fa/reset-confirm-otp', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({ otp_code: resetOtpCode })
       });
@@ -447,12 +422,10 @@ export default function ProfilePage() {
     if (!confirm('Unlink Google login for this account?')) return;
     setUnlinkMsg('');
     setUnlinkErr('');
-    const token = localStorage.getItem('admin_token');
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/user/unlink-google`, {
+      const res = await fetchAuthed('/api/v1/user/unlink-google', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
       });
 
       if (!res.ok) {
@@ -499,9 +472,11 @@ export default function ProfilePage() {
             </div>
             <div>
               <div className="flex items-center gap-2.5">
-                <h2 className="text-xl font-bold text-white">{profile?.name || 'User'}</h2>
+                <h2 className="text-xl font-bold text-white">
+                  {profile?.name || (profile?.email ? profile.email.split('@')[0] : 'User')}
+                </h2>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  {profile?.role_label || profile?.role}
+                  {profile?.role_label || profile?.role || 'User'}
                 </span>
               </div>
               <p className="text-sm text-slate-400 font-mono mt-0.5">{profile?.email}</p>

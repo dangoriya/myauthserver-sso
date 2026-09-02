@@ -82,7 +82,7 @@ def _validate_redirect_uri(client: ClientApp, redirect_uri: str) -> bool:
 def _resolve_client(db: Session, client_id: Optional[str], redirect_uri: Optional[str]):
     """Look up a client; return (client_obj, error_response_or_None)."""
     if not client_id:
-        client_id = "test_client_id_1"
+        return None, ("invalid_request", "Missing mandatory client_id parameter.")
     client = db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
     if not client:
         return None, ("unknown_client",
@@ -94,25 +94,30 @@ def _resolve_client(db: Session, client_id: Optional[str], redirect_uri: Optiona
 
 
 def _issue_auth_code_and_session(user: User, client_id: str, redirect_uri: str,
-                                 state: str, request: Request) -> tuple[Response, str, str]:
+                                 state: str, request: Request,
+                                 code_challenge: Optional[str] = None,
+                                 code_challenge_method: Optional[str] = None) -> tuple[Response, str, str]:
     """Create an SSO session + an auth code, return a redirect Response, the
     code URL, and the OIDC session id (sid) used by back-channel logout.
     """
+    from token_store import create_sso_session
+
     sso_session_id = str(uuid.uuid4())
     sid = register_user_session(user.id, client_id)
-    set_cache(
-        f"sso_session:{sso_session_id}",
-        {"user_id": user.id, "email": user.email, "name": user.name,
-         "sid": sid, "client_id": client_id},
-        ttl=86400,
-    )
+    create_sso_session(sso_session_id, user.id, user.email, user.name)
     auth_code = str(uuid.uuid4())
-    set_cache(
-        f"auth_code:{auth_code}",
-        {"user_id": user.id, "client_id": client_id, "redirect_uri": redirect_uri,
-         "sid": sid},
-        ttl=600,
-    )
+    payload = {
+        "user_id": user.id,
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "sid": sid,
+        "sso_session_id": sso_session_id,
+    }
+    if code_challenge:
+        payload["code_challenge"] = code_challenge
+        payload["code_challenge_method"] = code_challenge_method or "plain"
+
+    set_cache(f"auth_code:{auth_code}", payload, ttl=600)
     target = f"{redirect_uri}?code={auth_code}"
     if state:
         target += f"&state={urllib.parse.quote(state)}"
@@ -144,14 +149,16 @@ def openid_configuration():
         "token_endpoint": f"{settings.AUTH_SERVER_URL}/token",
         "userinfo_endpoint": f"{settings.AUTH_SERVER_URL}/userinfo",
         "end_session_endpoint": f"{settings.AUTH_SERVER_URL}/logout",
+        "revocation_endpoint": f"{settings.AUTH_SERVER_URL}/oauth/revoke",
+        "introspection_endpoint": f"{settings.AUTH_SERVER_URL}/oauth/introspect",
         "jwks_uri": f"{settings.AUTH_SERVER_URL}/jwks.json",
         "response_types_supported": ["code"],
         "subject_types_supported": ["public"],
         "id_token_signing_alg_values_supported": ["RS256"],
         "scopes_supported": ["openid", "profile", "email"],
-        "grant_types_supported": ["authorization_code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256", "plain"],
-        # OIDC RP-Initiated Logout 1.0
+        "token_endpoint_auth_methods_supported": ["client_secret_post"],
         "claims_supported": ["sub", "iss", "aud", "exp", "iat", "auth_time", "email",
                              "name", "picture", "role", "roles", "is_admin", "sid"],
         "backchannel_logout_supported": True,
@@ -611,24 +618,62 @@ async def google_auth_callback(
 
 
 # ===========================================================================
-# OIDC Token endpoint
+# OIDC Token endpoint (RFC 6749)
+#   grant_type=authorization_code  → access_token + id_token + refresh_token
+#   grant_type=refresh_token       → new access_token (and rotated refresh_token)
 # ===========================================================================
 @router.post("/token")
 def token_endpoint(
     grant_type: str = Form(...),
-    code: str = Form(...),
-    redirect_uri: str = Form(...),
+    code: Optional[str] = Form(None),
+    redirect_uri: Optional[str] = Form(None),
     client_id: str = Form(...),
     client_secret: str = Form(...),
     code_verifier: Optional[str] = Form(None),
+    refresh_token: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
-    if grant_type != "authorization_code":
-        raise HTTPException(status_code=400, detail="Unsupported grant_type")
-
     client = db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
     if not client or client.client_secret != client_secret:
         raise HTTPException(status_code=401, detail="Invalid client authentication")
+
+    from auth_utils import ACCESS_TOKEN_TTL as _TTL
+    from token_store import consume_refresh_token, issue_refresh_token
+
+    # ------------------------------------------------------------------
+    # grant_type=refresh_token
+    # ------------------------------------------------------------------
+    if grant_type == "refresh_token":
+        payload = consume_refresh_token(refresh_token or "")
+        if not payload:
+            raise HTTPException(status_code=400, detail="invalid_grant")
+        if payload.get("client_id") != client_id:
+            raise HTTPException(status_code=400, detail="client_id mismatch")
+        user = db.query(User).filter(User.id == payload["user_id"]).first()
+        if not user or not user.is_active:
+            raise HTTPException(status_code=400, detail="user not active")
+        user_role = user.role or ("admin" if user.is_admin else "normal-user")
+        sid = payload.get("sid")
+        scope = payload.get("scope", "openid profile email")
+        access_token = create_access_token(user.id, client_id, scope=scope,
+                                           role=user_role, is_admin=user.is_admin, sid=sid)
+        new_refresh = issue_refresh_token(user.id, client_id, sid, scope=scope)
+        return {
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": _TTL,
+            "refresh_token": new_refresh,
+            "scope": scope,
+        }
+
+    # ------------------------------------------------------------------
+    # grant_type=authorization_code
+    # ------------------------------------------------------------------
+    if grant_type != "authorization_code":
+        raise HTTPException(status_code=400, detail="Unsupported grant_type")
+
+    if not code or not redirect_uri:
+        raise HTTPException(status_code=400, detail="Missing code or redirect_uri")
 
     code_data = get_cache(f"auth_code:{code}")
     if not code_data:
@@ -637,11 +682,25 @@ def token_endpoint(
     if code_data["client_id"] != client_id or code_data["redirect_uri"] != redirect_uri:
         raise HTTPException(status_code=400, detail="Code client_id/redirect_uri mismatch")
 
+    # Verify PKCE if a challenge was provided during authorization
+    expected_challenge = code_data.get("code_challenge")
+    if expected_challenge:
+        if not code_verifier:
+            raise HTTPException(status_code=400, detail="Missing PKCE code_verifier")
+        method = code_data.get("code_challenge_method", "plain")
+        if method == "S256":
+            import hashlib, base64
+            computed = base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
+            if computed != expected_challenge:
+                raise HTTPException(status_code=400, detail="Invalid PKCE code_verifier")
+        elif method == "plain":
+            if code_verifier != expected_challenge:
+                raise HTTPException(status_code=400, detail="Invalid PKCE code_verifier")
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported PKCE method")
+
     # Single-use
     delete_cache(f"auth_code:{code}")
-
-    # Optional PKCE (S256/plain) — when client has PKCE bound, but we accept plain for compat
-    # (Full PKCE binding would require storing the challenge at code issue time.)
 
     user = db.query(User).filter(User.id == code_data["user_id"]).first()
     if not user:
@@ -652,12 +711,14 @@ def token_endpoint(
     id_token = create_id_token(user.id, user.email, user.name, client_id, user.picture,
                                role=user_role, is_admin=user.is_admin, sid=sid)
     access_token = create_access_token(user.id, client_id, role=user_role, is_admin=user.is_admin, sid=sid)
+    refresh = issue_refresh_token(user.id, client_id, sid)
 
     return {
         "access_token": access_token,
         "token_type": "Bearer",
-        "expires_in": 3600,
+        "expires_in": _TTL,
         "id_token": id_token,
+        "refresh_token": refresh,
         "scope": "openid profile email",
     }
 
@@ -827,4 +888,100 @@ def backchannel_logout_info(request: Request, db: Session = Depends(get_db)):
             }
             for c in clients
         ],
+    }
+
+
+# ===========================================================================
+# Token Revocation (RFC 7009) and Introspection (RFC 7662)
+#
+# /oauth/revoke  — client posts its refresh_token; we delete it. Returns
+#                  200 even if the token was unknown (idempotent).
+# /oauth/introspect — client posts a token; we return {active, sub, ...}.
+# /oauth/session/active — lightweight ping used by browser clients to
+#                         detect that the central SSO session was
+#                         terminated. 200 if the access token is still
+#                         valid AND the user is still active, else 401.
+# ===========================================================================
+@router.post("/oauth/revoke")
+def oauth_revoke(
+    token: str = Form(...),
+    token_type_hint: Optional[str] = Form(None),
+    client_id: str = Form(...),
+    client_secret: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    from token_store import revoke_refresh_token
+
+    client = db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
+    if not client or client.client_secret != client_secret:
+        raise HTTPException(status_code=401, detail="Invalid client authentication")
+
+    # We only store refresh tokens. Access tokens are stateless JWTs
+    # that expire on their own in 15 minutes.
+    revoke_refresh_token(token)
+    return Response(status_code=200)
+
+
+@router.post("/oauth/introspect")
+def oauth_introspect(
+    token: str = Form(...),
+    token_type_hint: Optional[str] = Form(None),
+    client_id: str = Form(...),
+    client_secret: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    from token_store import peek_refresh_token
+
+    client = db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
+    if not client or client.client_secret != client_secret:
+        raise HTTPException(status_code=401, detail="Invalid client authentication")
+
+    # Try refresh-token first (most common introspection case)
+    rt = peek_refresh_token(token)
+    if rt:
+        return {
+            "active": True,
+            "sub": rt.get("user_id"),
+            "client_id": rt.get("client_id"),
+            "scope": rt.get("scope"),
+            "exp": rt.get("exp"),
+            "token_type": "refresh_token",
+        }
+
+    # Fall back to access-token (JWT)
+    from auth_utils import decode_token
+    payload = decode_token(token)
+    if payload:
+        return {
+            "active": True,
+            "sub": payload.get("sub"),
+            "client_id": payload.get("client_id") or payload.get("aud"),
+            "scope": payload.get("scope"),
+            "exp": payload.get("exp"),
+            "token_type": "access_token",
+        }
+
+    return {"active": False}
+
+
+@router.get("/oauth/session/active")
+def oauth_session_active(request: Request):
+    """Lightweight ping used by client apps. 200 if the bearer token is
+    a valid (not expired) access token; 401 otherwise. Client apps call
+    this periodically (and on window focus) to detect a centralized
+    logout: once the user's refresh tokens have been revoked, every new
+    access token refresh will 400 and the app will start seeing 401s
+    here."""
+    from auth_utils import decode_token
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Bearer token required")
+    payload = decode_token(auth_header.split(" ", 1)[1])
+    if not payload:
+        raise HTTPException(status_code=401, detail="Token invalid or expired")
+    return {
+        "active": True,
+        "sub": payload.get("sub"),
+        "client_id": payload.get("client_id") or payload.get("aud"),
+        "exp": payload.get("exp"),
     }

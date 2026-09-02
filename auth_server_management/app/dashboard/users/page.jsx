@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import TailwindSelect from '@/app/components/TailwindSelect';
 import TailwindCheckbox from '@/app/components/TailwindCheckbox';
 import TailwindModal from '@/app/components/TailwindModal';
+import { fetchAuthed } from '@/app/lib/auth';
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState([]);
@@ -42,14 +43,9 @@ export default function UserManagementPage() {
   const [editActive, setEditActive] = useState(true);
   const [editError, setEditError] = useState('');
 
-  const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
-
   const fetchEnforce2FA = async () => {
-    const token = localStorage.getItem('admin_token');
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/admin/google-settings`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await fetchAuthed('/api/v1/admin/google-settings');
       if (res.ok) {
         const data = await res.json();
         setEnforce2FAAll(!!data.enforce_2fa_all);
@@ -73,19 +69,13 @@ export default function UserManagementPage() {
 
   const handleToggleEnforce2FAAll = async (checked) => {
     setEnforceLoading(true);
-    const token = localStorage.getItem('admin_token');
     try {
-      const gRes = await fetch(`${authServerUrl}/api/v1/admin/google-settings`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const gRes = await fetchAuthed('/api/v1/admin/google-settings');
       const gData = gRes.ok ? await gRes.json() : {};
 
-      const saveRes = await fetch(`${authServerUrl}/api/v1/admin/google-settings`, {
+      const saveRes = await fetchAuthed('/api/v1/admin/google-settings', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           client_id: gData.client_id || '',
           client_secret: gData.client_secret || '',
@@ -102,8 +92,6 @@ export default function UserManagementPage() {
       setEnforce2FAAll(checked);
       setPendingEnforce(null);
 
-      // After enabling, reload the user list so the 2FA status column
-      // immediately shows the new "Active" / "Setup" badges.
       if (checked) {
         await fetchUsers();
         const updated = saveData?.users_updated_to_require_2fa ?? 0;
@@ -136,7 +124,6 @@ export default function UserManagementPage() {
         title: 'Failed to update 2FA enforcement',
         description: err.message,
       });
-      // Reload the actual state from the server so the UI reflects truth
       await fetchEnforce2FA();
     } finally {
       setEnforceLoading(false);
@@ -145,16 +132,13 @@ export default function UserManagementPage() {
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
-    const token = localStorage.getItem('admin_token');
     try {
       const params = new URLSearchParams();
       if (searchQuery.trim()) params.append('search', searchQuery.trim());
       if (roleFilter) params.append('role', roleFilter);
       if (statusFilter) params.append('is_active', statusFilter === 'active');
 
-      const res = await fetch(`${authServerUrl}/api/v1/admin/users?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await fetchAuthed(`/api/v1/admin/users?${params.toString()}`);
       if (res.ok) {
         setUsers(await res.json());
       }
@@ -163,14 +147,11 @@ export default function UserManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, [authServerUrl, searchQuery, roleFilter, statusFilter]);
+  }, [searchQuery, roleFilter, statusFilter]);
 
   const fetchRoles = async () => {
-    const token = localStorage.getItem('admin_token');
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/admin/roles`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await fetchAuthed('/api/v1/admin/roles');
       if (res.ok) setRoles(await res.json());
     } catch (err) {
       console.error(err);
@@ -186,15 +167,11 @@ export default function UserManagementPage() {
   const handleCreateUser = async (e) => {
     e.preventDefault();
     setError('');
-    const token = localStorage.getItem('admin_token');
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/admin/users`, {
+      const res = await fetchAuthed('/api/v1/admin/users', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           email, 
           name, 
@@ -238,15 +215,11 @@ export default function UserManagementPage() {
     e.preventDefault();
     if (!editingUser) return;
     setEditError('');
-    const token = localStorage.getItem('admin_token');
 
     try {
-      const res = await fetch(`${authServerUrl}/api/v1/admin/users/${editingUser.id}`, {
+      const res = await fetchAuthed(`/api/v1/admin/users/${editingUser.id}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: editName,
           picture: editPicture,
@@ -270,26 +243,18 @@ export default function UserManagementPage() {
   };
 
   const toggleUserStatus = async (user) => {
-    const token = localStorage.getItem('admin_token');
-    await fetch(`${authServerUrl}/api/v1/admin/users/${user.id}`, {
+    await fetchAuthed(`/api/v1/admin/users/${user.id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_active: !user.is_active })
     });
     fetchUsers();
   };
 
   const resetUser2FA = async (user) => {
-    const token = localStorage.getItem('admin_token');
-    await fetch(`${authServerUrl}/api/v1/admin/users/${user.id}`, {
+    await fetchAuthed(`/api/v1/admin/users/${user.id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reset_2fa: true })
     });
     fetchUsers();
