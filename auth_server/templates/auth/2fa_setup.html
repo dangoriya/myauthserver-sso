@@ -50,13 +50,18 @@
 
     <div class="iam-field">
       <label class="iam-label">Enter 6-digit code from your app</label>
-      <input class="iam-otp-input {{ ferr.field_class('totp_code', errors) }}"
-             type="text" name="totp_code" required maxlength="6"
-             inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
-             placeholder="· · · · · ·" autofocus
-             data-validate="otp" data-hint="otp-hint">
-      <div class="iam-otp-hint" id="otp-hint">6 digits remaining</div>
-      {{ ferr.field_error('totp_code', errors) }}
+      <div class="iam-otp-boxes" id="otp-boxes-setup">
+        {% for i in range(6) %}
+        <input class="iam-otp-box" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" data-index="{{ i }}" {{ 'autofocus' if i == 0 else '' }}>
+        {% endfor %}
+      </div>
+      <input type="hidden" name="totp_code" id="totp_code_setup" value="">
+      <div class="iam-otp-hint" id="otp-hint-setup"></div>
+      {% if errors %}
+        {% if errors.totp_code %}
+          <div class="iam-field-error">{{ errors.totp_code }}</div>
+        {% endif %}
+      {% endif %}
     </div>
 
     <button type="submit" class="iam-btn iam-btn-amber" id="btn-verify">

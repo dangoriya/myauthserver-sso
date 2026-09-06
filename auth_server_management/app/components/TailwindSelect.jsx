@@ -106,17 +106,22 @@ export default function TailwindSelect({
                 No options available
               </div>
             )}
-            {options.map((option) => (
-              <ListboxOption
-                key={String(option.value)}
-                value={option}
-                className={`
-                  group relative cursor-default py-2 pr-9 pl-3
-                  text-white select-none
-                  data-focus:bg-indigo-500 data-focus:outline-hidden
-                  data-focus:text-white
-                `}
-              >
+            {options.map((option, idx) => (
+              <Fragment key={String(option.value)}>
+                {idx > 0 && (
+                  <div className="border-t border-slate-700/50" />
+                )}
+                 <ListboxOption
+                   value={option}
+                   className={`
+                     group relative cursor-default py-2 pr-9 pl-3
+                     text-white select-none
+                     min-h-[36px] flex items-center
+                     hover:bg-slate-700/50
+                     data-focus:bg-indigo-500 data-focus:outline-hidden
+                     data-focus:text-white
+                   `}
+                 >
                 <div className="flex items-center">
                   <span className="block truncate font-normal group-data-selected:font-semibold">
                     {option.label}
@@ -127,6 +132,7 @@ export default function TailwindSelect({
                   <CheckIcon aria-hidden="true" className="size-5" />
                 </span>
               </ListboxOption>
+              </Fragment>
             ))}
           </ListboxOptions>
         </div>

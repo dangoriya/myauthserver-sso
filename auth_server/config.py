@@ -1,5 +1,6 @@
 import os
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 
 class Settings(BaseSettings):
     ENV: str = "development"
@@ -15,7 +16,13 @@ class Settings(BaseSettings):
     
     REDIS_HOST: str = "redis"
     REDIS_PORT: int = 6379
-    REDIS_URL: str = "redis://redis:6379/0"
+    REDIS_URL: str = ""
+
+    @model_validator(mode="after")
+    def build_redis_url(self):
+        if not self.REDIS_URL:
+            self.REDIS_URL = f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
+        return self
     
     AUTH_SERVER_URL: str = "http://localhost:8000"
     MANAGEMENT_URL: str = "http://localhost:3005"
@@ -37,7 +44,7 @@ class Settings(BaseSettings):
 
 
     class Config:
-        env_file = ".env"
+        env_file = None  # Rely solely on environment variables from docker-compose
         extra = "allow"
 
 settings = Settings()

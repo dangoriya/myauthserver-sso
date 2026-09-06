@@ -385,7 +385,10 @@ def signup_request_code(data: SignupRequestCodeSchema, db: Session = Depends(get
     cache_data = {"code": code, "name": data.name or "", "email": email_clean}
     set_cache(f"signup_code:{email_clean}", cache_data, ttl=600)  # 10 minutes
 
-    EmailService.send_signup_verification_code(email_clean, data.name or "User", code)
+    try:
+        EmailService.send_signup_verification_code(email_clean, data.name or "User", code)
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to send verification email: {e}")
 
     return {
         "message": f"Verification code sent to {email_clean}",
@@ -576,7 +579,10 @@ def password_reset_request_otp(db: Session = Depends(get_db), current_user=Depen
     otp = f"{random.randint(100000, 999999)}"
     set_cache(f"reset_password_otp:{user.id}", {"otp": otp}, ttl=600)
 
-    EmailService.send_password_reset_otp(user.email, user.name or "User", otp)
+    try:
+        EmailService.send_password_reset_otp(user.email, user.name or "User", otp)
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to send password reset email: {e}")
 
     return {"message": f"Verification code sent to your email ({user.email})."}
 
@@ -671,7 +677,10 @@ def disable_2fa_request_otp(db: Session = Depends(get_db), current_user=Depends(
     otp = f"{random.randint(100000, 999999)}"
     set_cache(f"disable_2fa_otp:{user.id}", {"otp": otp}, ttl=600)
 
-    EmailService.send_2fa_disable_otp(user.email, user.name or "User", otp)
+    try:
+        EmailService.send_2fa_disable_otp(user.email, user.name or "User", otp)
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to send 2FA disable email: {e}")
 
     return {"message": f"Security verification code sent to your email ({user.email})."}
 
@@ -705,7 +714,10 @@ def user_2fa_reset_request_otp(db: Session = Depends(get_db), current_user=Depen
     otp = f"{random.randint(100000, 999999)}"
     set_cache(f"reset_2fa_otp:{user.id}", {"otp": otp}, ttl=600)
 
-    EmailService.send_2fa_reset_otp(user.email, user.name or "User", otp)
+    try:
+        EmailService.send_2fa_reset_otp(user.email, user.name or "User", otp)
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to send 2FA reset email: {e}")
 
     return {"message": f"Security OTP code sent to your registered email ({user.email})."}
 

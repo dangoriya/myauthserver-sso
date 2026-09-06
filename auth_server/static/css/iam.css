@@ -252,29 +252,54 @@ main.iam-wrapper { display: block; }
 .iam-input-icon-btn:hover { color: var(--text-primary); }
 
 /* OTP */
-.iam-otp-input {
-  width: 100%;
-  padding: 1.05rem 1rem;
+.iam-otp-boxes {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: center;
+  margin: 0.5rem 0 0.25rem;
+}
+.iam-otp-box {
+  width: 2.8rem;
+  height: 3.2rem;
+  text-align: center;
+  font-size: 1.4rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
   background: var(--input-bg);
   border: 1.5px solid var(--input-border);
-  border-radius: var(--radius-input);
-  color: #6ee7b7;
-  font-family: var(--font-mono);
-  font-size: 2rem;
-  font-weight: 700;
-  letter-spacing: 0.5em;
-  text-align: center;
+  border-radius: 0.6rem;
   outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+  caret-color: var(--accent-1);
 }
-.iam-otp-input::placeholder { color: #1e3a2e; letter-spacing: 0.3em; font-size: 1.5rem; }
-.iam-otp-input:focus {
+.iam-otp-box:focus {
   border-color: var(--accent-1);
-  box-shadow: 0 0 0 3px rgba(16,185,129,0.15), 0 0 24px rgba(16,185,129,0.10);
+  box-shadow: 0 0 0 2px rgba(16,185,129,0.2), 0 0 12px rgba(16,185,129,0.08);
 }
-.iam-otp-input.is-success { border-color: var(--accent-1); box-shadow: 0 0 16px rgba(16,185,129,0.22); }
-.iam-otp-input.is-error { border-color: var(--rose); box-shadow: 0 0 16px rgba(244,63,94,0.30); }
+.iam-otp-box.is-success {
+  border-color: var(--accent-1);
+  box-shadow: 0 0 0 2px rgba(16,185,129,0.25), 0 0 12px rgba(16,185,129,0.12);
+}
+.iam-otp-box.is-error {
+  border-color: var(--rose);
+  box-shadow: 0 0 0 2px rgba(244,63,94,0.25), 0 0 12px rgba(244,63,94,0.12);
+  animation: otp-shake 0.4s ease;
+}
 .iam-otp-hint { font-size: 0.7rem; color: var(--text-dim); text-align: center; margin-top: 0.4rem; height: 1rem; }
+
+@keyframes otp-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+
+@media (max-width: 480px) {
+  .iam-otp-box { width: 2.4rem; height: 2.8rem; font-size: 1.2rem; }
+  .iam-otp-boxes { gap: 0.35rem; }
+}
 
 /* Buttons */
 .iam-btn {

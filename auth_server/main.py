@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
@@ -9,7 +8,6 @@ from routers import auth_pages
 from config import settings
 from security import ensure_keys_on_startup
 import logging
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -29,21 +27,13 @@ app.state.templates = templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ---------------------------------------------------------------------------
-# CORS — restricted to configured origins
+# CORS — not required for current architecture.
+# The management app (Next.js BFF proxy) and test_client_app1 both make
+# server-to-server calls to this auth_server using INTERNAL_AUTH_SERVER_URL.
+# Browsers only interact via OIDC redirects (GET navigation), which don't
+# trigger CORS. If direct browser-to-OP AJAX calls are added later,
+# configure CORS_ALLOWED_ORIGINS here.
 # ---------------------------------------------------------------------------
-_allowed_origins = [
-    o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "*").split(",") if o.strip()
-]
-if not _allowed_origins:
-    _allowed_origins = ["*"]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_allowed_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-)
 
 # ---------------------------------------------------------------------------
 # Routers

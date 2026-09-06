@@ -3,12 +3,14 @@ services:
     image: pgvector/pgvector:pg15
     container_name: postgresdb
     restart: always
+    env_file: .env
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: admin
-      POSTGRES_DB: auth_db
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-auth_db}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -21,11 +23,12 @@ services:
     image: dpage/pgadmin4:latest
     container_name: pgadmin
     restart: always
+    env_file: .env
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@example.com
-      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
     ports:
-      - "5050:80"
+      - "${PGADMIN_PORT:-5050}:80"
     depends_on:
       postgresdb:
         condition: service_healthy
@@ -35,7 +38,7 @@ services:
     container_name: redis
     restart: always
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -49,31 +52,36 @@ services:
       context: ./auth_server
     container_name: auth_server
     restart: always
+    env_file: .env
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgresdb:5432/auth_db
-      - REDIS_URL=redis://redis:6379/0
-      - AUTH_SERVER_URL=${AUTH_SERVER_URL:-http://localhost:8000}
-      - MANAGEMENT_URL=${MANAGEMENT_URL:-http://localhost:3005}
-      - CENTRAL_DASHBOARD_URL=${CENTRAL_DASHBOARD_URL:-http://localhost:3005}
-      - SUCCESSFUL_SIGNUP_REDIRECT_URL=${SUCCESSFUL_SIGNUP_REDIRECT_URL:-http://localhost:3005}
-      - LOGOUT_REDIRECT_URL=${LOGOUT_REDIRECT_URL:-http://localhost:3005}
-      # Internal URL the OP uses to reach client apps for OIDC Back-Channel
-      # Logout. Falls back to host.docker.internal so back-channel POSTs
-      # can reach apps running on the Docker host (e.g. developer machine).
-      - CLIENT_CALLBACK_BASE_URL=${CLIENT_CALLBACK_BASE_URL:-http://host.docker.internal}
-      - RESET_DB=${RESET_DB:-true} # Set RESET_DB=true to drop & recreate tables cleanly on startup
-      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-smtp} # Options: "smtp" or "brevo_api"
-      - SMTP_HOST=${SMTP_HOST:-smtp-relay.brevo.com}
-      - SMTP_PORT=${SMTP_PORT:-587}
+      # Database — password sourced from .env for security
+      - DATABASE_URL=postgresql://admin:${POSTGRES_PASSWORD:-postgres}@postgresdb:${POSTGRES_PORT:-5432}/auth_db
+      # Redis — host/port sourced from .env so external Redis can be configured in production
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      # App & redirect URLs
+      - AUTH_SERVER_URL=http://localhost:8000
+      - MANAGEMENT_URL=http://localhost:3005
+      - CENTRAL_DASHBOARD_URL=http://localhost:3005
+      - SUCCESSFUL_SIGNUP_REDIRECT_URL=http://localhost:3005
+      - LOGOUT_REDIRECT_URL=http://localhost:3005
+      # Startup behavior — set to false to preserve existing data
+      - RESET_DB=true
+      # ----- Email Provider -----
+      # Options: "smtp" or "brevo_api"
+      - EMAIL_PROVIDER=smtp
+      - SMTP_HOST=smtp-relay.brevo.com
+      - SMTP_PORT=587
       - SMTP_USER=${SMTP_USER:-b5f8a3001@smtp-brevo.com}
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
-      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      - SMTP_USE_TLS=true
       - BREVO_API_KEY=${BREVO_API_KEY:-}
-      - EMAIL_FROM=${EMAIL_FROM:-dilipdangoriya@gmail.com}
-      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-DilipDangoriya}
-      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:3005,http://localhost:3001}
+      - EMAIL_FROM=dilipdangoriya@gmail.com
+      - EMAIL_FROM_NAME=DilipDangoriya
+      # Fallback secret key for JWT signing (should be overridden in production)
+      - SECRET_KEY=${SECRET_KEY:-dev-only-secret-key-change-in-prod}
     volumes:
       - auth_server_keys:/app/keys
     depends_on:
@@ -91,18 +99,19 @@ services:
       context: ./auth_server_management
     container_name: auth_server_management
     restart: always
+    env_file: .env
     ports:
       - "3005:3000"
     environment:
       # Browser-facing URL (public).
-      - NEXT_PUBLIC_AUTH_SERVER_URL=${AUTH_SERVER_URL:-http://localhost:8000}
+      - NEXT_PUBLIC_AUTH_SERVER_URL=http://localhost:8000
       # Server-side URL: used by Next.js route handlers (e.g. back-channel
       # logout) to fetch the JWKS from inside the Docker network. Must be
       # the Docker service name, NOT localhost.
       - AUTH_SERVER_INTERNAL_URL=http://auth_server:8000
       # Issuer claim the auth server puts in its tokens (must match exactly
       # the `iss` value used by the OP).
-      - AUTH_SERVER_ISSUER=${AUTH_SERVER_URL:-http://localhost:8000}
+      - AUTH_SERVER_ISSUER=http://localhost:8000
     depends_on:
       - auth_server
     extra_hosts:
@@ -113,6 +122,7 @@ services:
       context: ./test_client_app1
     container_name: test_client_app1
     restart: always
+    env_file: .env
     ports:
       - "3001:3001"
     environment:
@@ -127,7 +137,7 @@ services:
       # network and can resolve the `auth_server` service name.
       - INTERNAL_AUTH_SERVER_URL=http://auth_server:8000
       - CLIENT_ID=test_client_id_1
-      - CLIENT_SECRET=test_client_secret_1
+      - CLIENT_SECRET=${CLIENT_SECRET:-test_client_secret_1}
       - REDIRECT_URI=http://localhost:3001/callback
       # Public URL the user's browser uses to reach this app (used to
       # build the post_logout_redirect_uri).

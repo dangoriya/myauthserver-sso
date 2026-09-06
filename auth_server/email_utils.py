@@ -18,7 +18,7 @@ class EmailService:
 
         if provider == "brevo_api" and settings.BREVO_API_KEY:
             return EmailService._send_via_brevo_api(to_email, subject, body_html)
-        elif settings.SMTP_HOST and settings.SMTP_USER and settings.SMTP_PASSWORD:
+        elif provider == "smtp" and settings.SMTP_HOST and settings.SMTP_USER and settings.SMTP_PASSWORD:
             return EmailService._send_via_smtp(to_email, subject, body_html, body_text)
         else:
             # Development fallback logging if no credentials set
@@ -54,11 +54,13 @@ class EmailService:
                     logger.info(f"✅ Brevo API email sent successfully to {to_email}")
                     return True
                 else:
-                    logger.error(f"❌ Brevo API Email failed ({res.status_code}): {res.text}")
-                    return False
+                    error_msg = f"Brevo API email failed ({res.status_code}): {res.text}"
+                    logger.error(f"❌ {error_msg}")
+                    raise RuntimeError(error_msg)
         except Exception as e:
-            logger.error(f"❌ Error sending email via Brevo API: {e}")
-            return False
+            error_msg = f"Error sending email via Brevo API: {e}"
+            logger.error(f"❌ {error_msg}")
+            raise RuntimeError(error_msg) from e
 
     @staticmethod
     def _send_via_smtp(to_email: str, subject: str, body_html: str, body_text: str = None) -> bool:
@@ -81,8 +83,9 @@ class EmailService:
             logger.info(f"✅ SMTP email sent successfully to {to_email}")
             return True
         except Exception as e:
-            logger.error(f"❌ Error sending email via SMTP: {e}")
-            return False
+            error_msg = f"Error sending email via SMTP: {e}"
+            logger.error(f"❌ {error_msg}")
+            raise RuntimeError(error_msg) from e
 
     @staticmethod
     def send_signup_verification_code(to_email: str, name: str, code: str) -> bool:

@@ -16,21 +16,126 @@
     });
   });
 
-  // ---- OTP / 6-digit code helpers ----
-  document.querySelectorAll('input.iam-otp-input, input[data-otp]').forEach(function (inp) {
-    inp.addEventListener('input', function (e) {
-      const cleaned = inp.value.replace(/\D/g, '').slice(0, 6);
-      inp.value = cleaned;
-      inp.classList.remove('is-error', 'is-success');
-      const hint = document.getElementById(inp.getAttribute('data-hint') || 'otp-hint');
-      if (hint) {
-        const rem = 6 - cleaned.length;
-        hint.textContent = rem > 0 ? rem + ' digit' + (rem !== 1 ? 's' : '') + ' remaining' : '';
+  // ---- OTP / 6-digit code helpers (6-box style) ----
+  function initOtpBoxes(containerId, hiddenInputId, hintId, submitBtnId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const boxes = Array.from(container.querySelectorAll('.iam-otp-box'));
+    const hidden = document.getElementById(hiddenInputId);
+    const hint = document.getElementById(hintId);
+    const btn = submitBtnId ? document.getElementById(submitBtnId) : null;
+    const TOTAL = boxes.length;
+
+    function updateHidden() {
+      if (hidden) hidden.value = boxes.map(b => b.value).join('');
+    }
+
+    function clearStates() {
+      boxes.forEach(b => b.classList.remove('is-success', 'is-error'));
+    }
+
+    function setBoxState(index, state) {
+      boxes.forEach((b, i) => {
+        if (i !== index) b.classList.remove('is-error', 'is-success');
+      });
+      if (index >= 0 && index < TOTAL) {
+        boxes[index].classList.remove('is-error', 'is-success');
+        boxes[index].classList.add(state);
       }
-      if (cleaned.length === 6) {
-        inp.classList.add('is-success');
+    }
+
+    function updateButtonState() {
+      const code = boxes.map(b => b.value).join('');
+      if (btn) btn.disabled = code.length !== TOTAL;
+    }
+
+    function trySubmit() {
+      const code = boxes.map(b => b.value).join('');
+      if (code.length === TOTAL && btn) {
+        btn.click();
+      }
+    }
+
+    function validateAndMark() {
+      const code = boxes.map(b => b.value).join('');
+      if (code.length === TOTAL) {
+        clearStates();
+        boxes.forEach(b => b.classList.add('is-success'));
+        if (hint) hint.textContent = '';
+        trySubmit();
+      } else if (code.length > 0) {
+        if (hint) hint.textContent = (TOTAL - code.length) + ' digit' + (TOTAL - code.length !== 1 ? 's' : '') + ' remaining';
+      } else {
+        if (hint) hint.textContent = '';
+      }
+      updateButtonState();
+      return code.length === TOTAL;
+    }
+
+    boxes.forEach((box, i) => {
+      box.addEventListener('input', function (e) {
+        const val = box.value.replace(/\D/g, '').slice(0, 1);
+        box.value = val;
+        clearStates();
+        updateHidden();
+        if (val && i + 1 < TOTAL) {
+          boxes[i + 1].focus();
+        }
+        validateAndMark();
+        if (boxes.map(b => b.value).join('').length === TOTAL) {
+          trySubmit();
+        }
+      });
+
+      box.addEventListener('keydown', function (e) {
+        if (e.key === 'Backspace' && !box.value && i > 0) {
+          boxes[i - 1].focus();
+        }
+        if (e.key === 'ArrowLeft' && i > 0) {
+          boxes[i - 1].focus();
+          e.preventDefault();
+        }
+        if (e.key === 'ArrowRight' && i + 1 < TOTAL) {
+          boxes[i + 1].focus();
+          e.preventDefault();
+        }
+      });
+
+      box.addEventListener('focus', function () {
+        box.select();
+      });
+
+      box.addEventListener('paste', function (e) {
+        e.preventDefault();
+        const paste = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, TOTAL);
+        clearStates();
+        for (let j = 0; j < TOTAL; j++) {
+          boxes[j].value = paste[j] || '';
+        }
+        updateHidden();
+        validateAndMark();
+        const filled = paste.length;
+        if (filled === TOTAL) {
+          boxes.forEach(b => b.classList.add('is-success'));
+          trySubmit();
+        } else if (filled > 0) {
+          const next = Math.min(filled, TOTAL - 1);
+          boxes[next].focus();
+        }
+      });
+    });
+
+    container.addEventListener('click', function (e) {
+      if (e.target === container) {
+        const firstEmpty = boxes.find(b => !b.value);
+        (firstEmpty || boxes[0]).focus();
       }
     });
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    initOtpBoxes('otp-boxes-verify', 'totp_code_verify', 'otp-hint-verify', 'btn-verify');
+    initOtpBoxes('otp-boxes-setup', 'totp_code_setup', 'otp-hint-setup', 'btn-verify');
   });
 
   // ---- Copy secret key (2FA) ----

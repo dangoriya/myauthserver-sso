@@ -98,7 +98,11 @@ def _mask_email(email: str) -> str:
 def _send_otp(email: str, name: str) -> str:
     code = "".join(str(random.randint(0, 9)) for _ in range(OTP_LEN))
     set_cache(f"signup_code:{email.lower()}", code, ttl=OTP_TTL)
-    EmailService.send_signup_verification_code(email, name, code)
+    try:
+        EmailService.send_signup_verification_code(email, name, code)
+    except RuntimeError as e:
+        logger.error(f"Failed to send signup OTP to {email}: {e}")
+        raise
     return code
 
 

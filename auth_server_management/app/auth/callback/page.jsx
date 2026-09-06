@@ -40,10 +40,10 @@ export default function AuthCallbackPage() {
         params.append('client_id', 'auth_management_app');
         params.append('client_secret', 'auth_management_secret');
 
-        const res = await fetch(`${authServerUrl}/token`, {
+        const res = await fetch('/api/proxy/token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: params.toString()
+          body: params.toString(),
         });
 
         if (!res.ok) {
