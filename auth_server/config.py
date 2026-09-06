@@ -24,11 +24,20 @@ class Settings(BaseSettings):
             self.REDIS_URL = f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
         return self
     
+    @model_validator(mode="after")
+    def set_management_fallbacks(self):
+        if not self.CENTRAL_DASHBOARD_URL:
+            self.CENTRAL_DASHBOARD_URL = self.MANAGEMENT_URL
+        if not self.LOGOUT_REDIRECT_URL:
+            self.LOGOUT_REDIRECT_URL = self.MANAGEMENT_URL
+        return self
+    
     AUTH_SERVER_URL: str = "http://localhost:8000"
     MANAGEMENT_URL: str = "http://localhost:3005"
-    CENTRAL_DASHBOARD_URL: str = "http://localhost:3005"
-    SUCCESSFUL_SIGNUP_REDIRECT_URL: str = "http://localhost:3005"
-    LOGOUT_REDIRECT_URL: str = "http://localhost:3005"
+    CENTRAL_DASHBOARD_URL: str = ""
+    LOGOUT_REDIRECT_URL: str = ""
+
+    BACKCHANNEL_LOGOUT_ENABLED: bool = False
 
     # Email Service Settings (SMTP or Brevo API)
     EMAIL_PROVIDER: str = "smtp"  # "smtp" or "brevo_api"

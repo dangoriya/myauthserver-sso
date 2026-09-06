@@ -263,7 +263,10 @@ def perform_centralized_logout(
         if originating_client_id and originating_client_id in sessions:
             del sessions[originating_client_id]
         if sessions:
-            if db is not None:
+            if not settings.BACKCHANNEL_LOGOUT_ENABLED:
+                logger.info("Back-channel logout is globally disabled; skipping client notifications")
+                summary["backchannel_results"] = {}
+            elif db is not None:
                 summary["backchannel_results"] = notify_clients_backchannel(user_id, db=db)
             else:
                 # No DB available: still fire the POSTs but without client

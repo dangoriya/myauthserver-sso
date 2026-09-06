@@ -64,9 +64,9 @@ services:
       # App & redirect URLs
       - AUTH_SERVER_URL=http://localhost:8000
       - MANAGEMENT_URL=http://localhost:3005
-      - CENTRAL_DASHBOARD_URL=http://localhost:3005
-      - SUCCESSFUL_SIGNUP_REDIRECT_URL=http://localhost:3005
-      - LOGOUT_REDIRECT_URL=http://localhost:3005
+      # OIDC Back-Channel Logout 1.0 — set to "true" to enable global
+      # back-channel logout to all clients with backchannel_logout_enabled=True
+      - BACKCHANNEL_LOGOUT_ENABLED=false
       # Startup behavior — set to false to preserve existing data
       - RESET_DB=true
       # ----- Email Provider -----
@@ -89,10 +89,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    extra_hosts:
-      # Lets the OP reach client apps running on the host machine for
-      # back-channel logout. Add other host names here as needed.
-      - "host.docker.internal:host-gateway"
 
   auth_server_management:
     build:
@@ -105,17 +101,12 @@ services:
     environment:
       # Browser-facing URL (public).
       - NEXT_PUBLIC_AUTH_SERVER_URL=http://localhost:8000
-      # Server-side URL: used by Next.js route handlers (e.g. back-channel
-      # logout) to fetch the JWKS from inside the Docker network. Must be
-      # the Docker service name, NOT localhost.
+      # Server-side URL: used by Next.js route handlers to fetch the JWKS
+      # from inside the Docker network. Must be the Docker service name,
+      # NOT localhost.
       - AUTH_SERVER_INTERNAL_URL=http://auth_server:8000
-      # Issuer claim the auth server puts in its tokens (must match exactly
-      # the `iss` value used by the OP).
-      - AUTH_SERVER_ISSUER=http://localhost:8000
     depends_on:
       - auth_server
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
 
   test_client_app1:
     build:

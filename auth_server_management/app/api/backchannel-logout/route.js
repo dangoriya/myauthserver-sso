@@ -7,8 +7,8 @@ import { NextResponse } from 'next/server';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 // ISSUER: the issuer URL the auth server puts in the `iss` claim. Must
-// match exactly. From the browser this is `http://localhost:8000`, but
-// Next.js renders server-side too so we use a dedicated env var.
+// match exactly. Falls back to NEXT_PUBLIC_AUTH_SERVER_URL (the browser-
+// facing auth server URL) which is the same value used in JWTs.
 const AUTH_SERVER_ISSUER =
   process.env.AUTH_SERVER_ISSUER ||
   process.env.NEXT_PUBLIC_AUTH_SERVER_URL ||

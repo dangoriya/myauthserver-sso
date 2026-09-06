@@ -161,8 +161,8 @@ def openid_configuration():
         "token_endpoint_auth_methods_supported": ["client_secret_post"],
         "claims_supported": ["sub", "iss", "aud", "exp", "iat", "auth_time", "email",
                              "name", "picture", "role", "roles", "is_admin", "sid"],
-        "backchannel_logout_supported": True,
-        "backchannel_logout_session_supported": True,
+        "backchannel_logout_supported": settings.BACKCHANNEL_LOGOUT_ENABLED,
+        "backchannel_logout_session_supported": settings.BACKCHANNEL_LOGOUT_ENABLED,
     }
 
 
@@ -877,6 +877,7 @@ def backchannel_logout_info(request: Request, db: Session = Depends(get_db)):
                  .filter(ClientApp.client_id.in_(sessions.keys()) if sessions else ClientApp.id.is_(None))
                  .all())
     return {
+        "backchannel_logout_globally_enabled": settings.BACKCHANNEL_LOGOUT_ENABLED,
         "user_id": user_id,
         "active_sessions": [
             {

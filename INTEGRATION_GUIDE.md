@@ -1,545 +1,394 @@
-# IAM Central Auth Server — Developer Integration Guide
+# SSO Integration Guide
 
-> **Auth Server base URL:** `http://localhost:8000`  
-> **Management Portal:** `http://localhost:3005`  
-> **Protocol:** OpenID Connect 1.0 (Authorization Code Flow)
+Quick-start reference for registering and integrating client applications with the IAM Auth Server (OIDC/OAuth2 SSO provider).
 
----
-
-## Table of Contents
-
-1. [Architecture Overview](#1-architecture-overview)
-2. [How SSO Works — The Complete Flow](#2-how-sso-works)
-3. [Registering a Client Application](#3-registering-a-client-application)
-4. [OIDC Endpoints Reference](#4-oidc-endpoints-reference)
-5. [Integration — Step-by-Step](#5-integration-step-by-step)
-6. [Token Structure & Claims](#6-token-structure--claims)
-7. [Two-Factor Authentication (2FA/OTP)](#7-two-factor-authentication-2faotp)
-8. [Google OAuth Integration](#8-google-oauth-integration)
-9. [Single Sign-On (SSO) Session](#9-single-sign-on-sso-session)
-10. [Single Logout (SLO)](#10-single-logout-slo)
-11. [Environment Configuration](#11-environment-configuration)
-12. [Troubleshooting](#12-troubleshooting)
-
----
-
-## 1. Architecture Overview
+## Architecture Overview
 
 ```
-+------------------------------------------------------------------+
-|                          Your System                             |
-|                                                                  |
-|  +------------------+     +-------------------------+           |
-|  |  Client App(s)   |     |  Auth Server Mgmt       |           |
-|  |  (port 3001+)    |     |  (port 3005)            |           |
-|  |                  |     |  * Admin portal          |           |
-|  |  Any web app     |     |  * User management       |           |
-|  |  that needs      |     |  * Client app config     |           |
-|  |  authentication  |     |  * Google settings       |           |
-|  +--------+---------+     +-------------------------+           |
-|           |  OIDC redirect                                       |
-|           v                                                      |
-|  +----------------------------------------------------------+   |
-|  |         IAM Central Auth Server (port 8000)              |   |
-|  |                                                          |   |
-|  |  /authorize   - SSO login page (your SSO portal)        |   |
-|  |  /token       - Token exchange endpoint                  |   |
-|  |  /userinfo    - User profile & roles                     |   |
-|  |  /logout      - Single Logout                            |   |
-|  |  /jwks.json   - Public keys for JWT verification         |   |
-|  |  /auth/google - Google OAuth2 initiation                 |   |
-|  |                                                          |   |
-|  |  Identity Sources:                                       |   |
-|  |    1. Local accounts (email + password)                  |   |
-|  |    2. Google OAuth2 (if configured)                      |   |
-|  |    3. Optional: TOTP-based 2FA                           |   |
-|  +----------------------------------------------------------+   |
-|           |                                                      |
-|  +------------------------------------------------------------+  |
-|  |  PostgreSQL (users, roles, client apps, settings)         |  |
-|  |  Redis       (SSO sessions, auth codes, OTP cache)        |  |
-|  +------------------------------------------------------------+  |
-+------------------------------------------------------------------+
+    Browser                     ┌──────────────┐         ┌──────────────────┐
+   ─────────                    │  auth_server  │         │ auth_server_     │
+     · Auth redirect flow       │  :8000 (OP)   │◀────────│ management  :3000 │
+     · SSO cookie               └──────────────┘         └──────────────────┘
+                                     │  ▲
+                                     │  │ server↔server
+                                     │  │ (Docker network)
+                                ┌────┴──┐
+                                │ redis  │
+                                │ postgres│
+                                └────────┘
 ```
 
----
+| Service | Port | Role |
+|---|---|---|
+| auth_server | `8000` | OIDC Provider (OP) — FastAPI, RS256 JWT signing |
+| auth_server_management | `3005→3000` | Management portal (OIDC client) — Next.js |
+| test_client_app1 | `3001` | Example client app (OIDC client) — Express |
+| postgresdb | `5432` | User data, roles, client registrations |
+| redis | `6379` | SSO sessions, auth codes, refresh tokens |
+| pgadmin | `5050` | PostgreSQL UI |
 
-## 2. How SSO Works
+## Start Up
 
-### Standard OIDC Authorization Code Flow
-
-```
-User Browser         Client App          IAM Auth Server       Google (optional)
-     |                    |                     |                     |
-     | Visit /dashboard   |                     |                     |
-     |------------------->|                     |                     |
-     |                    | Not authenticated   |                     |
-     |                    | Redirect to         |                     |
-     |<-------------------| /authorize?...      |                     |
-     |                                          |                     |
-     | GET /authorize?client_id=...             |                     |
-     |----------------------------------------->                     |
-     |                                          | Show SSO login page |
-     |<-----------------------------------------|                     |
-     |                                          |                     |
-     | User enters email + password             |                     |
-     | (or clicks "Continue with Google")       |                     |
-     |----------------------------------------->                     |
-     |                                          | [if Google]         |
-     |                                          |-------------------->|
-     |                                          |  Google OAuth       |
-     |                                          |<--------------------|
-     |                                          |                     |
-     |                                          | [if 2FA required]   |
-     |<-----------------------------------------| Show 2FA page       |
-     | User enters TOTP code                    |                     |
-     |----------------------------------------->                     |
-     |                                          |                     |
-     | Redirect to redirect_uri?code=<code>     |                     |
-     |<-----------------------------------------|                     |
-     |                                          |                     |
-     | GET /callback?code=...&state=...         |                     |
-     |------------------->|                     |                     |
-     |                    | POST /token         |                     |
-     |                    | (server-to-server)  |                     |
-     |                    |-------------------->|                     |
-     |                    | {access_token,      |                     |
-     |                    |  id_token}          |                     |
-     |                    |<--------------------|                     |
-     |                    |                     |                     |
-     |                    | GET /userinfo       |                     |
-     |                    |-------------------->|                     |
-     |                    | {sub,email,role...} |                     |
-     |                    |<--------------------|                     |
-     |                    |                     |                     |
-     | User is authenticated!                   |                     |
-     |<-------------------|                     |                     |
+```bash
+docker-compose up --build
 ```
 
-### SSO Session (Re-Login Skip)
+The auth server runs at `http://localhost:8000`.
 
-Once a user is authenticated, the IAM server stores an **SSO session cookie** (`sso_session`, httpOnly, 24h TTL) in the browser backed by Redis. If the same user opens another client app that redirects to `/authorize`, the auth server detects the existing session and **automatically issues a new auth code without showing the login page**. This is true Single Sign-On.
+## 1. Register Your Client App
 
----
+**Endpoint:** `POST /api/v1/clients` (requires admin Bearer token or SSO session cookie)
 
-## 3. Registering a Client Application
-
-Client applications must be registered in the IAM Management Portal before they can use the auth server.
-
-### Via Management Portal UI
-
-1. Open `http://localhost:3005` and sign in as admin (`admin@example.com` / `admin123`)
-2. Navigate to **Dashboard → Client Apps**
-3. Click **Register New Client**
-4. Fill in:
-   - **Client Name**: Human-readable name (e.g. "My Sales App")
-   - **Redirect URIs**: Comma-separated list of allowed callback URLs
-   - **SSO Enabled**: Toggle on/off
-5. Copy the generated **Client ID** and **Client Secret**
-
-### Pre-registered Clients (Seeded)
-
-| Client ID             | Secret                   | App                     | Redirect URIs                         |
-|-----------------------|--------------------------|-------------------------|---------------------------------------|
-| `test_client_id_1`    | `test_client_secret_1`   | Test Client App 1       | `http://localhost:3001/callback`      |
-| `auth_management_app` | `auth_management_secret` | Auth Server Management  | `http://localhost:3005/auth/callback` |
-
-> **WARNING:** Never expose your `client_secret` in frontend JavaScript. The `/token` endpoint must always be called server-to-server.
-
----
-
-## 4. OIDC Endpoints Reference
-
-### Discovery Endpoint
-```
-GET http://localhost:8000/.well-known/openid-configuration
-```
-Returns all endpoint URLs. Use this to auto-configure standard OIDC libraries.
-
-### Authorization Endpoint (SSO Login Page)
-```
-GET http://localhost:8000/authorize
-  ?client_id=your_client_id
-  &redirect_uri=http://localhost:3001/callback
-  &response_type=code
-  &scope=openid%20profile%20email
-  &state=random_csrf_token
+```bash
+curl -X POST http://localhost:8000/api/v1/clients \
+  -H "Authorization: Bearer <admin-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_name": "My Client App",
+    "redirect_uris": "http://localhost:3001/callback",
+    "is_sso_enabled": true
+  }'
 ```
 
-| Parameter       | Required    | Description                                           |
-|-----------------|-------------|-------------------------------------------------------|
-| `client_id`     | Yes         | Your registered client ID                             |
-| `redirect_uri`  | Yes         | Must exactly match a registered redirect URI          |
-| `response_type` | Yes         | Always `code`                                         |
-| `scope`         | Yes         | `openid profile email`                                |
-| `state`         | Recommended | Random CSRF token; echoed back in callback            |
+**Response** (save `client_id` and `client_secret` — they are shown only once):
 
-### Token Endpoint
-```
-POST http://localhost:8000/token
-Content-Type: application/x-www-form-urlencoded
-
-grant_type=authorization_code
-&code=<auth_code>
-&redirect_uri=http://localhost:3001/callback
-&client_id=your_client_id
-&client_secret=your_client_secret
-```
-
-**Response:**
 ```json
 {
-  "access_token": "eyJhbGci...",
-  "token_type": "Bearer",
-  "expires_in": 3600,
-  "id_token": "eyJhbGci..."
+  "id": "uuid",
+  "client_id": "client_a1b2c3d4e5f6",
+  "client_secret": "secret_x7y8z9...",
+  "client_name": "My Client App",
+  "redirect_uris": "http://localhost:3001/callback",
+  "is_sso_enabled": true,
+  "backchannel_logout_enabled": false,
+  "created_at": "2024-..."
 }
 ```
 
-### Userinfo Endpoint
+New clients are created with `backchannel_logout_enabled=false` by default. Enable it later if you register a back-channel logout endpoint (see [Back-Channel Logout](#back-channel-logout)).
+
+### List / Delete Clients
+
+```bash
+curl http://localhost:8000/api/v1/clients \
+  -H "Authorization: Bearer <admin-access-token>"
+
+curl -X DELETE http://localhost:8000/api/v1/clients/client_a1b2c3d4e5f6 \
+  -H "Authorization: Bearer <admin-access-token>"
 ```
-GET http://localhost:8000/userinfo
-Authorization: Bearer <access_token>
+
+## 2. OIDC Authorization Code Flow
+
+### Step 1 — Browser Redirect to Auth Server
+
 ```
-**Response:**
+GET http://localhost:8000/authorize?
+  client_id=client_a1b2c3d4e5f6
+  &redirect_uri=http://localhost:3001/callback
+  &response_type=code
+  &scope=openid%20profile%20email
+  &state=RANDOM_STRING
+  &code_challenge=...      # optional PKCE
+  &code_challenge_method=S256   # optional
+```
+
+Parameters:
+| Parameter | Required | Description |
+|---|---|---|
+| `client_id` | Yes | From client registration |
+| `redirect_uri` | Yes | Must match a registered URI exactly |
+| `response_type` | Yes | Must be `code` |
+| `scope` | Yes | `openid` required; `profile` and `email` recommended |
+| `state` | Recommended | Opaque value for CSRF protection — must be verified on callback |
+| `code_challenge` | Optional | PKCE code challenge |
+| `code_challenge_method` | Optional | `S256` or `plain` (PKCE) |
+
+If the user has no active SSO session, they are routed to the login page. If they have a valid `sso_session` cookie and the client has `is_sso_enabled=true`, they are silently issued a code without re-entering credentials.
+
+### Step 2 — Callback with Auth Code
+
+The browser is redirected to your `redirect_uri` with:
+
+```
+GET http://localhost:3001/callback?code=AUTH_CODE&state=YOUR_STATE
+```
+
+Verify `state` matches what you sent. Then exchange the code server-to-server.
+
+### Step 3 — Exchange Code for Tokens (Server-to-Server)
+
+```bash
+curl -X POST http://localhost:8000/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d 'grant_type=authorization_code' \
+  -d 'code=AUTH_CODE' \
+  -d 'redirect_uri=http://localhost:3001/callback' \
+  -d 'client_id=client_a1b2c3d4e5f6' \
+  -d 'client_secret=secret_x7y8z9...' \
+  -d 'code_verifier=...'  # if PKCE was used
+```
+
+Response:
+
 ```json
 {
-  "sub": "user-uuid",
-  "email": "user@company.com",
-  "name": "Jane Smith",
+  "access_token": "eyJhbGciOiJSUzI1NiIs...",
+  "token_type": "Bearer",
+  "expires_in": 900,
+  "id_token": "eyJhbGciOiJSUzI1NiIs...",
+  "refresh_token": "opaque_refresh_token",
+  "scope": "openid profile email"
+}
+```
+
+Token lifetimes:
+- **Access token (JWT):** 15 minutes
+- **Refresh token:** 7 days
+- **SSO session:** 24 hours
+
+The access token and id_token are RS256-signed JWTs. Verify signatures via the JWKS endpoint (see below).
+
+### Step 4 — Fetch User Info (Server-to-Server, Optional)
+
+```bash
+curl http://localhost:8000/userinfo \
+  -H "Authorization: Bearer <access_token>"
+```
+
+```json
+{
+  "sub": "user_id",
+  "email": "user@example.com",
+  "name": "User Name",
   "picture": "https://...",
   "provider": "local",
+  "role": "normal-user",
+  "roles": ["normal-user"],
+  "is_admin": false,
+  "is_2fa_enabled": false
+}
+```
+
+### Step 5 — Refresh Access Token (Server-to-Server)
+
+When the access token expires (15 min), use the refresh token:
+
+```bash
+curl -X POST http://localhost:8000/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d 'grant_type=refresh_token' \
+  -d 'refresh_token=AUTH_REFRESH_TOKEN' \
+  -d 'client_id=client_a1b2c3d4e5f6' \
+  -d 'client_secret=secret_x7y8z9...'
+```
+
+Refresh tokens are single-use (rotated per RFC 6749 §6). The old refresh token is invalidated on each use.
+
+### Detecting Centralized Logout
+
+When a user logs out of the SSO session (via `/logout` or admin action), all their refresh tokens are revoked. Client apps detect this within 15 minutes when their next token refresh fails.
+
+For faster detection, poll the session-active endpoint:
+
+```bash
+curl http://localhost:8000/oauth/session/active \
+  -H "Authorization: Bearer <access_token>"
+```
+
+- `200` — session still active, token valid
+- `401` — token invalid/expired or user logged out (refresh will fail)
+
+Call on `window.focus` and every ~30s for near-real-time SSO logout detection.
+
+## 3. JWKS / Token Verification
+
+The OP publishes its public keys at:
+
+```
+GET http://localhost:8000/jwks.json
+```
+
+JWT claims in access tokens:
+```json
+{
+  "iss": "http://localhost:8000",     // issuer
+  "sub": "user_id",                   // user id
+  "aud": "client_a1b2c3d4e5f6",       // client id
+  "exp": 1234567890,
+  "iat": 1234567890,
+  "scope": "openid profile email",
   "role": "normal-user",
   "roles": ["normal-user"],
   "is_admin": false
 }
 ```
 
-### JWKS Endpoint
-```
-GET http://localhost:8000/jwks.json
-```
-
-### Logout Endpoint
-```
-GET http://localhost:8000/logout?post_logout_redirect_uri=http://localhost:3001
-```
-
----
-
-## 5. Integration — Step-by-Step
-
-### Node.js / Express
-
-```javascript
-const express = require('express');
-const axios = require('axios');
-const cookieParser = require('cookie-parser');
-const crypto = require('crypto');
-
-const app = express();
-app.use(cookieParser());
-
-const AUTH_SERVER_URL = process.env.AUTH_SERVER_URL || 'http://localhost:8000';
-const CLIENT_ID       = process.env.CLIENT_ID       || 'your_client_id';
-const CLIENT_SECRET   = process.env.CLIENT_SECRET   || 'your_client_secret';
-const REDIRECT_URI    = process.env.REDIRECT_URI    || 'http://localhost:3001/callback';
-
-// Step 1: Redirect user to IAM SSO login page
-app.get('/login', (req, res) => {
-  const state = crypto.randomBytes(16).toString('hex'); // CSRF protection
-  res.cookie('oauth_state', state, { httpOnly: true, maxAge: 5 * 60 * 1000 });
-
-  const authUrl = `${AUTH_SERVER_URL}/authorize?` + new URLSearchParams({
-    client_id: CLIENT_ID, redirect_uri: REDIRECT_URI,
-    response_type: 'code', scope: 'openid profile email', state,
-  });
-  res.redirect(authUrl);
-});
-
-// Step 2: Callback - exchange code for tokens
-app.get('/callback', async (req, res) => {
-  const { code, state, error } = req.query;
-  if (error) return res.redirect(`/?error=${error}`);
-
-  // CSRF validation
-  if (state !== req.cookies.oauth_state) return res.status(400).send('Invalid state');
-  res.clearCookie('oauth_state');
-
-  // Token exchange (server-to-server)
-  const tokenRes = await axios.post(`${AUTH_SERVER_URL}/token`,
-    new URLSearchParams({ grant_type: 'authorization_code', code,
-      redirect_uri: REDIRECT_URI, client_id: CLIENT_ID, client_secret: CLIENT_SECRET }));
-  const { access_token } = tokenRes.data;
-
-  // Fetch user info
-  const userRes = await axios.get(`${AUTH_SERVER_URL}/userinfo`,
-    { headers: { Authorization: `Bearer ${access_token}` } });
-
-  // user.role = "admin" | "normal-user" | custom
-  // user.is_admin = true | false
-  res.cookie('session', access_token, { httpOnly: true });
-  res.cookie('user', JSON.stringify(userRes.data), { httpOnly: true });
-  res.redirect('/dashboard');
-});
-
-// Step 3: Logout
-app.get('/logout', (req, res) => {
-  res.clearCookie('session');
-  res.clearCookie('user');
-  res.redirect(`${AUTH_SERVER_URL}/logout?post_logout_redirect_uri=http://localhost:3001`);
-});
-```
-
-### Python / FastAPI
-
-```python
-import secrets, httpx
-from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse
-
-app = FastAPI()
-AUTH_SERVER_URL = "http://localhost:8000"
-CLIENT_ID       = "your_client_id"
-CLIENT_SECRET   = "your_client_secret"
-REDIRECT_URI    = "http://localhost:8080/callback"
-
-@app.get("/login")
-def login():
-    state = secrets.token_hex(16)
-    from urllib.parse import urlencode
-    params = urlencode({"client_id": CLIENT_ID, "redirect_uri": REDIRECT_URI,
-                        "response_type": "code", "scope": "openid profile email", "state": state})
-    response = RedirectResponse(f"{AUTH_SERVER_URL}/authorize?{params}")
-    response.set_cookie("oauth_state", state, httponly=True, max_age=300)
-    return response
-
-@app.get("/callback")
-async def callback(request: Request, code: str = None, state: str = None):
-    async with httpx.AsyncClient() as client:
-        token_res = await client.post(f"{AUTH_SERVER_URL}/token", data={
-            "grant_type": "authorization_code", "code": code,
-            "redirect_uri": REDIRECT_URI, "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET})
-        user_res = await client.get(f"{AUTH_SERVER_URL}/userinfo",
-            headers={"Authorization": f"Bearer {token_res.json()['access_token']}"})
-    user = user_res.json()
-    # user["role"] and user["is_admin"] contain role information
-    return RedirectResponse("/dashboard")
-```
-
-### Next.js (App Router)
-
-```typescript
-// app/auth/callback/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const code = searchParams.get('code');
-  const error = searchParams.get('error');
-
-  if (error) return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/?error=${error}`);
-
-  // Server-side token exchange
-  const tokenRes = await fetch(`${process.env.AUTH_SERVER_URL}/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'authorization_code', code: code!,
-      redirect_uri: process.env.REDIRECT_URI!,
-      client_id: process.env.CLIENT_ID!, client_secret: process.env.CLIENT_SECRET!,
-    }),
-  });
-  const { access_token } = await tokenRes.json();
-
-  const userRes = await fetch(`${process.env.AUTH_SERVER_URL}/userinfo`,
-    { headers: { Authorization: `Bearer ${access_token}` } });
-  const user = await userRes.json();
-
-  const response = NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/dashboard`);
-  response.cookies.set('session', access_token, { httpOnly: true, maxAge: 3600 });
-  response.cookies.set('user', JSON.stringify(user), { httpOnly: true, maxAge: 3600 });
-  return response;
-}
-```
-
----
-
-## 6. Token Structure & Claims
-
-The IAM auth server issues **RS256 JWT tokens**. Verify them with the public key from `/jwks.json`.
-
-### id_token Payload
+JWT claims in id tokens:
 ```json
 {
-  "iss":      "http://localhost:8000",
-  "sub":      "user-uuid",
-  "aud":      "your_client_id",
-  "exp":      1700000000,
-  "iat":      1699996400,
-  "email":    "jane@company.com",
-  "name":     "Jane Smith",
-  "picture":  "https://...",
-  "role":     "normal-user",
-  "is_admin": false
+  "iss": "http://localhost:8000",
+  "sub": "user_id",
+  "aud": "client_a1b2c3d4e5f6",
+  "exp": 1234567890,
+  "iat": 1234567890,
+  "auth_time": 1234567890,
+  "email": "user@example.com",
+  "name": "User Name",
+  "picture": "https://...",
+  "role": "normal-user",
+  "roles": ["normal-user"],
+  "is_admin": false,
+  "sid": "oidc_session_id"
 }
 ```
 
-### access_token Payload
-```json
-{
-  "sub":      "user-uuid",
-  "aud":      "your_client_id",
-  "exp":      1700000000,
-  "role":     "admin",
-  "is_admin": true
-}
-```
+Verify tokens by:
+1. Fetch JWKS from `/jwks.json`
+2. Match `kid` in the JWT header to a key in JWKS
+3. Verify `iss` equals `http://localhost:8000`
+4. Verify `aud` equals your `client_id`
+5. Check `exp`
 
-### Default Roles
+## 4. Logout
 
-| Role name     | Description                                    |
-|---------------|------------------------------------------------|
-| `admin`       | Full system access, includes admin features    |
-| `normal-user` | Standard authenticated user                    |
-| *(custom)*    | Any additional roles created in the portal     |
+### RP-Initiated Logout (Browser Redirect)
 
----
-
-## 7. Two-Factor Authentication (2FA/OTP)
-
-Supports **TOTP** (Google Authenticator, Authy, Microsoft Authenticator).
-
-### When 2FA is triggered
-
-1. User has enabled 2FA on their own account (via management portal)
-2. Admin has enabled "Enforce 2FA for All Users" in Google Settings
-
-### Flow (completely transparent to your client app)
+Redirect the browser to:
 
 ```
-POST /login-submit (password OK)
-        |
-        +-- 2FA required?
-        |        |
-        |   YES  v
-        |   /2fa-setup-page  <- first time: scan QR code
-        |        or
-        |   /2fa-verify-page <- enter 6-digit TOTP code
-        |        |
-        |        v
-        |   /2fa-stepup-submit -> issues auth_code
-        |
-        +-- NO -> issues auth_code immediately
-        |
-        v
-GET /callback?code=<auth_code>  <-- your app always receives this
+GET http://localhost:8000/logout?
+  id_token_hint=<id_token_from_step_3>&
+  post_logout_redirect_uri=http://localhost:3001/logged-out&
+  state=OPTIONAL_STATE
 ```
 
-Your `/callback` endpoint receives the authorization code only after all authentication steps are complete, regardless of whether 2FA was required.
+The auth server will:
+1. Verify the id_token (may be expired — this is allowed)
+2. Terminate the central SSO session
+3. Revoke all refresh tokens for the user (forces re-auth on all clients)
+4. Redirect the browser to the registered `post_logout_redirect_uri`
 
----
+The `post_logout_redirect_uri` must be registered during client creation by appending it to `post_logout_redirect_uris`. If not provided, the user is redirected to `MANAGEMENT_URL` (default `http://localhost:3005`).
 
-## 8. Google OAuth Integration
+### API Logout (Server-Initiated)
 
-### Setup
+For admin-forced logout or programmatic logout:
 
-1. Create OAuth 2.0 credentials at [console.cloud.google.com](https://console.cloud.google.com/)
-2. Set Authorized Redirect URI: `http://localhost:8000/auth/google/callback`
-3. In Management Portal: **Dashboard → Google Settings**
-   - Enter Google **Client ID** and **Client Secret**
-   - Redirect URI: `http://localhost:8000/auth/google/callback`
-   - Toggle **Enable Google Login**
-
-When enabled, a "Continue with Google" button appears on the SSO login page automatically.
-
-### Behavior
-
-- New Google users → auto-registered with `provider=google`, role `normal-user`
-- Existing email → linked to existing account
-- 2FA still applies if enabled
-
----
-
-## 9. Single Sign-On (SSO) Session
-
-The `sso_session` cookie (httpOnly, 24h TTL) enables true SSO:
-
-1. User signs into Client App A → SSO session created
-2. User opens Client App B → session detected → **auto-issued auth code** → logged in without re-entering credentials
-
-Configure per-client in Management Portal: **Client Apps → Edit → SSO Enabled**.
-
----
-
-## 10. Single Logout (SLO)
-
-```
-GET http://localhost:8000/logout?post_logout_redirect_uri=http://localhost:3001
+```bash
+curl -X POST http://localhost:8000/api/v1/sso/logout \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id": "target_user_id"}'
 ```
 
-Clears SSO session from Redis + browser cookie, then redirects to your app.
+The caller must be the target user or an admin. This endpoint revokes all refresh tokens and terminates the SSO session. Back-channel logout is dispatched only if `BACKCHANNEL_LOGOUT_ENABLED=true` and the client has `backchannel_logout_enabled=true`.
 
-Always also clear your own app's session cookies before redirecting to the IAM logout endpoint.
+### Token Revocation (RFC 7009)
 
----
-
-## 11. Environment Configuration
-
-### Auth Server (`auth_server/.env`)
-
-| Variable                          | Description                          |
-|-----------------------------------|--------------------------------------|
-| `AUTH_SERVER_URL`                | Public base URL of auth server        |
-| `MANAGEMENT_URL`                 | URL of management portal              |
-| `DATABASE_URL`                   | PostgreSQL connection string          |
-| `REDIS_URL`                      | Redis connection string               |
-| `SUCCESSFUL_SIGNUP_REDIRECT_URL` | Redirect after new user signup        |
-| `LOGOUT_REDIRECT_URL`            | Default redirect after logout         |
-
-### Client App Minimum Variables
-
-```env
-AUTH_SERVER_URL=http://auth_server:8000  # container-to-container
-# OR
-AUTH_SERVER_URL=http://localhost:8000    # if running locally
-
-CLIENT_ID=your_client_id
-CLIENT_SECRET=your_client_secret
-REDIRECT_URI=http://localhost:PORT/callback
+```bash
+curl -X POST http://localhost:8000/oauth/revoke \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d 'token=<refresh_token>' \
+  -d 'token_type_hint=refresh_token' \
+  -d 'client_id=client_a1b2c3d4e5f6' \
+  -d 'client_secret=secret_x7y8z9...'
 ```
 
-> **Note:** Inside Docker, use `http://auth_server:8000` for server-to-server calls (token exchange, userinfo). The `REDIRECT_URI` and browser-facing URLs must use `http://localhost:PORT`.
+Returns `200` (idempotent — no error even if the token was unknown).
 
----
+## 5. Discovery
 
-## 12. Troubleshooting
-
-| Problem | Cause | Solution |
-|---------|-------|----------|
-| `Invalid redirect_uri` on login | redirect_uri not registered | Exact match required in Client Apps |
-| `Code client_id/redirect_uri mismatch` on token exchange | redirect_uri differs between /authorize and /token | Use identical string in both |
-| `Invalid or expired code` | Code used twice or expired (10min) | Check for double-submission (React StrictMode) |
-| No Google button on login page | Google login disabled | Enable in Management Portal → Google Settings |
-| 2FA page not appearing | 2FA not enabled for user or globally | Enable in user settings or Google Settings |
-| SSO session not working | SSO disabled for client | Enable in Client Apps → Edit → SSO Enabled |
-| Token verification fails | RSA key rotated | Refresh JWKS from /jwks.json |
-
----
-
-## Quick Start Checklist
+The OIDC discovery document is available at:
 
 ```
-[ ] 1. Register client app in Management Portal
-[ ] 2. Save client_id and client_secret (keep secret server-side!)
-[ ] 3. Set redirect_uri to match your /callback route exactly
-[ ] 4. Implement /login — redirect to /authorize with state param
-[ ] 5. Implement /callback — exchange code via /token (server-side)
-[ ] 6. Call /userinfo for role + profile (or parse id_token)
-[ ] 7. Implement /logout — call IAM /logout + clear local cookies
-[ ] 8. Use role/is_admin from token for access control in your app
+GET http://localhost:8000/.well-known/openid-configuration
 ```
 
----
+Auto-discovery libraries can consume this directly. Key fields:
+- `issuer` = `http://localhost:8000`
+- `authorization_endpoint` = `http://localhost:8000/authorize`
+- `token_endpoint` = `http://localhost:8000/token`
+- `userinfo_endpoint` = `http://localhost:8000/userinfo`
+- `end_session_endpoint` = `http://localhost:8000/logout`
+- `jwks_uri` = `http://localhost:8000/jwks.json`
 
-*IAM Central Auth Server v1.0.0 — Generated 2026-08-23*
+## Configuration Reference (docker-compose / .env)
+
+### auth_server
+
+| Variable | Default | Description |
+|---|---|---|
+| `AUTH_SERVER_URL` | `http://localhost:8000` | Public URL of the auth server; used as JWT `iss` and for OIDC discovery. Must be browser-accessible. |
+| `MANAGEMENT_URL` | `http://localhost:3005` | Management app public URL. `CENTRAL_DASHBOARD_URL` and `LOGOUT_REDIRECT_URL` default to this value. |
+| `BACKCHANNEL_LOGOUT_ENABLED` | `false` | Global toggle for OIDC Back-Channel Logout 1.0. When `false`, the server never POSTs logout tokens to clients. |
+| `REDIS_HOST` | `redis` | Redis service name (Docker network) |
+| `REDIS_PORT` | `6379` | Redis port |
+| `DATABASE_URL` | (see docker-compose) | PostgreSQL connection string |
+| `RESET_DB` | `true` | Set `false` to preserve existing data on restart |
+| `EMAIL_PROVIDER` | `smtp` | `"smtp"` or `"brevo_api"` |
+| `SECRET_KEY` | (from .env) | Fallback JWT signing secret if no RSA keypair mounted |
+
+### auth_server_management (Next.js)
+
+| Variable | Default | Description |
+|---|---|---|
+| `NEXT_PUBLIC_AUTH_SERVER_URL` | `http://localhost:8000` | Browser-facing auth server URL (exposed to client-side JS) |
+| `AUTH_SERVER_INTERNAL_URL` | `http://auth_server:8000` | Server-side URL for internal calls (JWKS fetch, proxy). Uses Docker service name. |
+
+### test_client_app1
+
+| Variable | Default | Description |
+|---|---|---|
+| `AUTH_SERVER_URL` | `http://localhost:8000` | Public auth server URL (browser redirects) |
+| `INTERNAL_AUTH_SERVER_URL` | `http://auth_server:8000` | Internal URL for server-to-server token/userinfo calls |
+| `CLIENT_ID` | `test_client_id_1` | Registered client ID |
+| `CLIENT_SECRET` | (from .env) | Client secret |
+| `REDIRECT_URI` | `http://localhost:3001/callback` | Must match registered URI |
+| `PUBLIC_BASE_URL` | `http://localhost:3001` | This app's public URL |
+
+## Back-Channel Logout
+
+The auth server supports OIDC Back-Channel Logout 1.0 for server-to-server session termination. This is **disabled by default** — no configuration is needed to get SSO login/logout working.
+
+To enable:
+
+1. Set `BACKCHANNEL_LOGOUT_ENABLED=true` in `docker-compose.yml`
+2. Provide a back-channel logout endpoint in your client app:
+   ```
+   POST /backchannel-logout
+   Content-Type: application/x-www-form-urlencoded
+   Body: logout_token=<signed JWT>
+   ```
+3. Register the endpoint URI in the client's `backchannel_logout_uris` column in the database
+4. Set `backchannel_logout_enabled=true` for the client
+
+The OP will POST a `logout_token` JWT (with `events` claim containing `http://schemas.openid.net/event/backchannel-logout`) to each registered URI when a user's SSO session is terminated. Verify the token signature via the JWKS endpoint.
+
+See `auth_server/logout.py` for the dispatch implementation and `auth_server_management/app/api/backchannel-logout/route.js` for a reference implementation.
+
+## Quick Reference: Essential URLs
+
+```
+# Auth server (issuer)
+http://localhost:8000
+
+# Management app
+http://localhost:3005
+
+# Client registration (admin)
+POST http://localhost:8000/api/v1/clients
+
+# OIDC endpoints
+http://localhost:8000/.well-known/openid-configuration
+http://localhost:8000/jwks.json
+http://localhost:8000/authorize
+http://localhost:8000/token
+http://localhost:8000/userinfo
+http://localhost:8000/logout
+http://localhost:8000/oauth/session/active
+
+# Management API
+POST http://localhost:8000/api/v1/auth/login
+GET  http://localhost:8000/api/v1/clients
+POST http://localhost:8000/api/v1/sso/logout
+```
