@@ -2,38 +2,37 @@
 <!--
   IAM Auth Server — Application Logo
   200x200 viewBox. Square (renders cleanly at 120x120 / 48x48).
-  For Google Auth Platform submission, convert to a 120x120 PNG.
-  The shield + key motif represents secure identity / access control.
+  For Google Auth Platform submission, export to a 120x120 PNG.
+
+  Design: "DD" monogram (Dilip Dangoriya) — unique to the brand owner,
+  not a generic security symbol, so it should pass Google's
+  "uniquely identifies your brand" branding check.
 -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="IAM Auth Server logo">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="DD — IAM Auth Server">
   <defs>
-    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="ddbg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#10b981"/>
       <stop offset="50%" stop-color="#14b8a6"/>
       <stop offset="100%" stop-color="#6366f1"/>
     </linearGradient>
-    <linearGradient id="keyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#e0f2fe"/>
-    </linearGradient>
   </defs>
 
   <!-- Rounded square background -->
-  <rect x="10" y="10" width="180" height="180" rx="40" fill="url(#shieldGrad)"/>
+  <rect x="10" y="10" width="180" height="180" rx="40" fill="url(#ddbg)"/>
 
-  <!-- Shield outline -->
-  <path d="M100 36 L156 60 L156 108 C156 138 132 162 100 170 C68 162 44 138 44 108 L44 60 Z"
-        fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="2"/>
-
-  <!-- Key shape -->
-  <g transform="translate(100 100)">
-    <!-- Key bow (head) -->
-    <circle cx="-18" cy="0" r="22" fill="none" stroke="url(#keyGrad)" stroke-width="8"/>
-    <circle cx="-18" cy="0" r="7" fill="rgba(15,23,42,0.9)"/>
-    <!-- Key shaft -->
-    <line x1="2" y1="0" x2="44" y2="0" stroke="url(#keyGrad)" stroke-width="8" stroke-linecap="round"/>
-    <!-- Key teeth -->
-    <line x1="30" y1="0" x2="30" y2="12" stroke="url(#keyGrad)" stroke-width="8" stroke-linecap="round"/>
-    <line x1="40" y1="0" x2="40" y2="9"  stroke="url(#keyGrad)" stroke-width="8" stroke-linecap="round"/>
-  </g>
+  <!--
+    "DD" monogram. Using a robust system-font stack so the monogram
+    renders consistently across browsers and crawlers. The kerning/letter-
+    spacing is tightened to overlap the two D's slightly, which is the
+    classic DD monogram style and keeps the mark compact and distinctive.
+  -->
+  <text x="100" y="100"
+        text-anchor="middle"
+        dominant-baseline="central"
+        font-family="Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+        font-size="96"
+        font-weight="800"
+        fill="#ffffff"
+        letter-spacing="-6"
+        style="font-feature-settings: 'kern' 1, 'liga' 1;">DD</text>
 </svg>
