@@ -82,23 +82,6 @@ def run_migrations(reset: bool = False):
             db.add(g_setting)
             print("  ✅ Google Setting initialized.")
             
-        # Seed Default Client SSO Applications
-        default_client = db.query(ClientApp).filter(ClientApp.client_id == "test_client_id_1").first()
-        test_client_secret = os.environ.get("CLIENT_SECRET", "test_client_secret_1")
-        if not default_client:
-            default_client = ClientApp(
-                client_id="test_client_id_1",
-                client_secret=test_client_secret,
-                client_name="Test App 1",
-                redirect_uris="http://localhost:3001/callback",
-                post_logout_redirect_uris="http://localhost:3001/logged-out",
-                backchannel_logout_uris="",
-                backchannel_logout_enabled=False,
-                allowed_grant_types="authorization_code",
-                is_sso_enabled=True
-            )
-            db.add(default_client)
-            print(f"  ✅ Default Client App created: test_client_id_1 (secret from env)")
 
         # Seed Auth Server Management Client App
         management_redirect_uri = f"{settings.MANAGEMENT_URL.rstrip('/')}/auth/callback"

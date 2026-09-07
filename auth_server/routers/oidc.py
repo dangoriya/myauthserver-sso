@@ -500,7 +500,7 @@ def google_auth_init(
     if not g or not g.is_enabled or not g.client_id:
         raise HTTPException(status_code=400, detail="Google Login is not configured")
 
-    target_client_id = client_id or "test_client_id_1"
+    target_client_id = client_id or "auth_management_app"
     target_redirect_uri = redirect_uri or settings.CENTRAL_DASHBOARD_URL
     oauth_state = f"{target_client_id}|{target_redirect_uri}|{state}"
     params = {
@@ -549,7 +549,7 @@ async def google_auth_callback(
 
     g = db.query(GoogleSetting).filter(GoogleSetting.id == 1).first()
     state_parts = state.split("|") if state else []
-    target_client_id = state_parts[0] if len(state_parts) > 0 and state_parts[0] else "test_client_id_1"
+    target_client_id = state_parts[0] if len(state_parts) > 0 and state_parts[0] else "auth_management_app"
     target_redirect_uri = state_parts[1] if len(state_parts) > 1 and state_parts[1] else settings.CENTRAL_DASHBOARD_URL
     app_state = state_parts[2] if len(state_parts) > 2 else ""
 
