@@ -752,13 +752,14 @@ async def terms_get(request: Request, response: Response, db: Session = Depends(
 
 
 # ---------------------------------------------------------------------------
-# Favicon — served at the site root (/favicon.ico) so every browser,
-# feed reader, and crawler finds it without relying on the <link> tag.
-# The file is generated from static/img/logo.png (multi-size ICO).
+# Favicon — served at /icon.png so the URL matches the management app's
+# Next.js favicon (`app/icon.png` -> /icon.png) and so the browser tab
+# icon resolves everywhere. The PNG at static/img/logo.png is the same
+# 120x120 DD monogram used as the management app's favicon.
 # ---------------------------------------------------------------------------
-@router.get("/favicon.ico", include_in_schema=False)
-async def favicon():
+@router.get("/icon.png", include_in_schema=False)
+async def icon_png():
     return FileResponse(
-        "static/img/favicon.ico",
-        media_type="image/x-icon",
+        "static/img/logo.png",
+        media_type="image/png",
     )
