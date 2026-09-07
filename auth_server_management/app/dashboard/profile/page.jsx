@@ -242,7 +242,7 @@ export default function ProfilePage() {
     setPwdLoading(true);
 
     try {
-      const res = await fetchAuthed('/api/v1/user/password-reset/confirm-otp', {
+      const res = await fetchAuthed('/api/v1/user/password-reset/set-new-password', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

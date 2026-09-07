@@ -593,7 +593,7 @@ def password_reset_verify_otp(data: VerifyOtpSchema, db: Session = Depends(get_d
     """Validate the email OTP and mark it as verified for this session.
 
     Lets the management UI prompt-check the 6-digit code on its own step (so an
-    invalid code is caught immediately) before the final confirm-otp step sets
+    invalid code is caught immediately) before the final set-new-password step sets
     the new password. The OTP itself is NOT consumed here — only a short-lived
     `otp_verified` flag is recorded, so a user can re-try the code if needed.
     """
