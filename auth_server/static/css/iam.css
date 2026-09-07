@@ -743,6 +743,13 @@ main.iam-wrapper { display: block; }
 .public-app-list strong { color: #f8fafc; }
 .public-app-list code { color: #a5b4fc; font-size: 0.85rem; }
 .public-app-list span { grid-column: 2; color: #94a3b8; font-size: 0.88rem; }
+.public-app-list a.public-app-link {
+  text-decoration: none; color: inherit;
+  transition: opacity 0.15s;
+}
+.public-app-list a.public-app-link:hover {
+  opacity: 0.85; text-decoration: underline;
+}
 @media (max-width: 540px) {
   .public-app-list li { grid-template-columns: 1fr; }
   .public-app-list span { grid-column: 1; }

@@ -18,8 +18,8 @@ Used for Google Auth Platform "Application home page" verification. #}
 <main class="public-main">
   <!-- ─────────── HERO ─────────── -->
   <section class="public-hero">
-    <span class="public-eyebrow">Identity &amp; access control</span>
-    <h1>One account. Every app on <span class="grad-text">dilipdangoriya.com.np</span>.</h1>
+    <span class="public-eyebrow">Identity &amp; access management</span>
+    <h1>One account. Every app on <span class="grad-text">dilipdangoriya.com.np</span></h1>
     <p class="public-lede">
       The IAM Auth Server is the central sign-in for the
       <code>dilipdangoriya.com.np</code> family of applications. Sign in once with your
@@ -166,13 +166,13 @@ Used for Google Auth Platform "Application home page" verification. #}
     <h2 class="public-h2">Apps currently using the auth server</h2>
     <p class="public-sub">
       Single sign-on is live across these internal subdomains of
-      <code>dilipdangoriya.com.np</code>.
+      <code>dilipdangoriya.com.np</code>
     </p>
     <ul class="public-app-list">
       {% for subdomain, label, desc in apps %}
       <li>
-        <strong>{{ label }}</strong>
-        <code>{{ subdomain }}</code>
+        <strong><a class="public-app-link" href="https://{{ subdomain }}" target="_blank" rel="noopener noreferrer">{{ label }}</a></strong>
+        <code><a class="public-app-link" href="https://{{ subdomain }}" target="_blank" rel="noopener noreferrer">{{ subdomain }}</a></code>
         <span>{{ desc }}</span>
       </li>
       {% endfor %}
