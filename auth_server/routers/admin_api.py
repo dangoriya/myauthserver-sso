@@ -925,6 +925,16 @@ def update_user(user_id: str, data: UserUpdateSchema, db: Session = Depends(get_
     db.commit()
     return {"message": "User updated"}
 
+@router.delete("/admin/users/{user_id}")
+def delete_user(user_id: str, db: Session = Depends(get_db), admin=Depends(verify_admin)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    db.delete(user)
+    db.commit()
+    return {"message": "User deleted successfully", "user_id": user_id}
+
 # Client Application Management
 @router.get("/admin/clients")
 def list_clients(db: Session = Depends(get_db), admin=Depends(verify_admin)):

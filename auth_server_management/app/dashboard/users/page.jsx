@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import TailwindSelect from '@/app/components/TailwindSelect';
 import TailwindCheckbox from '@/app/components/TailwindCheckbox';
 import TailwindModal from '@/app/components/TailwindModal';
-import { fetchAuthed } from '@/app/lib/auth';
+import { fetchAuthed, getStoredUser } from '@/app/lib/auth';
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState([]);
@@ -42,6 +42,15 @@ export default function UserManagementPage() {
   const [edit2FA, setEdit2FA] = useState(false);
   const [editActive, setEditActive] = useState(true);
   const [editError, setEditError] = useState('');
+
+  // Current logged-in user (for admin-only action visibility)
+  const [currentUser, setCurrentUser] = useState(null);
+  const isAdmin = currentUser?.is_admin || currentUser?.role === 'admin';
+
+  // Confirmation modal states for destructive actions
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState(null);
+  const [reset2FAConfirmUser, setReset2FAConfirmUser] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null); // 'delete' | 'reset-2fa' | null
 
   const fetchEnforce2FA = async () => {
     try {
@@ -159,6 +168,7 @@ export default function UserManagementPage() {
   };
 
   useEffect(() => {
+    setCurrentUser(getStoredUser());
     fetchUsers();
     fetchRoles();
     fetchEnforce2FA();
@@ -258,6 +268,47 @@ export default function UserManagementPage() {
       body: JSON.stringify({ reset_2fa: true })
     });
     fetchUsers();
+  };
+
+  const deleteUser = async (user) => {
+    setActionLoading('delete');
+    try {
+      const res = await fetchAuthed(`/api/v1/admin/users/${user.id}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'Failed to delete user');
+      }
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(null);
+      setDeleteConfirmUser(null);
+    }
+  };
+
+  const confirmReset2FA = async () => {
+    if (!reset2FAConfirmUser) return;
+    setActionLoading('reset-2fa');
+    try {
+      const res = await fetchAuthed(`/api/v1/admin/users/${reset2FAConfirmUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reset_2fa: true })
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'Failed to reset 2FA');
+      }
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(null);
+      setReset2FAConfirmUser(null);
+    }
   };
 
   const roleFilterOptions = [
@@ -440,12 +491,34 @@ export default function UserManagementPage() {
                         ✏️ Edit
                       </button>
 
+                  <button
+                    onClick={() => toggleUserStatus(u)}
+                    className={`text-xs px-3 py-1.5 rounded-lg border transition ${u.is_active ? 'border-rose-500/30 text-rose-400 hover:bg-rose-500/10' : 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10'}`}
+                  >
+                    {u.is_active ? 'Disable' : 'Enable'}
+                  </button>
+
+                  {isAdmin && (
+                    <>
                       <button
-                        onClick={() => toggleUserStatus(u)}
-                        className={`text-xs px-3 py-1.5 rounded-lg border transition ${u.is_active ? 'border-rose-500/30 text-rose-400 hover:bg-rose-500/10' : 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10'}`}
+                        onClick={() => setReset2FAConfirmUser(u)}
+                        disabled={actionLoading === 'reset-2fa'}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-300 hover:bg-sky-500/20 transition flex items-center gap-1 font-medium"
+                        title="Reset 2FA"
                       >
-                        {u.is_active ? 'Disable' : 'Enable'}
+                        🔐 Reset 2FA
                       </button>
+
+                      <button
+                        onClick={() => setDeleteConfirmUser(u)}
+                        disabled={actionLoading === 'delete'}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20 transition flex items-center gap-1 font-medium"
+                        title="Delete Account"
+                      >
+                        🗑️ Delete
+                      </button>
+                    </>
+                  )}
                     </div>
                   </td>
                 </tr>
@@ -702,6 +775,46 @@ export default function UserManagementPage() {
             {enforceResult.details}
           </p>
         )}
+       </TailwindModal>
+
+      {/* Delete Account Confirmation Modal (Admin only) */}
+      <TailwindModal
+        open={!!deleteConfirmUser}
+        onClose={() => setDeleteConfirmUser(null)}
+        onConfirm={() => deleteUser(deleteConfirmUser)}
+        title="Delete User Account?"
+        description={`This action cannot be undone. ${deleteConfirmUser?.email || 'user'}`}
+        icon="🗑️"
+        tone="rose"
+        confirmLabel="Delete Account"
+        cancelLabel="Cancel"
+        loading={actionLoading === 'delete'}
+      >
+        <ul className="space-y-2 list-disc list-inside text-slate-300">
+          <li>Permanently removes the user account and all associated credentials.</li>
+          <li>The user will no longer be able to sign in.</li>
+          <li>Any active sessions will be invalidated.</li>
+        </ul>
+      </TailwindModal>
+
+      {/* Reset 2FA Confirmation Modal (Admin only) */}
+      <TailwindModal
+        open={!!reset2FAConfirmUser}
+        onClose={() => setReset2FAConfirmUser(null)}
+        onConfirm={confirmReset2FA}
+        title="Reset 2FA for this user?"
+        description={`A new 2FA setup will be required on next login. ${reset2FAConfirmUser?.email || 'user'}`}
+        icon="🔐"
+        tone="amber"
+        confirmLabel="Reset 2FA"
+        cancelLabel="Cancel"
+        loading={actionLoading === 'reset-2fa'}
+      >
+        <ul className="space-y-2 list-disc list-inside text-slate-300">
+          <li>Clears the current TOTP secret key.</li>
+          <li>2FA will be disabled and the user must reconfigure it on next login.</li>
+          <li>The user must still verify their email/OTP if email-based 2FA is enforced.</li>
+        </ul>
       </TailwindModal>
     </div>
   );
