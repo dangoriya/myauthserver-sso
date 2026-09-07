@@ -84,22 +84,27 @@
       The code expires in 10 minutes.
     </div>
 
-    <div class="iam-field">
-      <label class="iam-label">Enter 6-Digit Code</label>
-      <input class="iam-otp-input {{ ferr.field_class('code', errors) }}"
-             type="text" name="code" required maxlength="6"
-             inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code"
-             placeholder="· · · · · ·" autofocus
-             data-validate="otp" data-hint="otp-hint">
-      <div class="iam-otp-hint" id="otp-hint">6 digits remaining</div>
-      {{ ferr.field_error('code', errors) }}
-    </div>
+     <div class="iam-field">
+       <label class="iam-label">Enter 6-Digit Code</label>
+       <div class="iam-otp-boxes" id="otp-boxes-mail">
+         {% for i in range(6) %}
+         <input class="iam-otp-box" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="one-time-code" data-index="{{ i }}" {{ 'autofocus' if i == 0 else '' }}>
+         {% endfor %}
+       </div>
+       <input type="hidden" name="code" id="code_mail" value="">
+       <div class="iam-otp-hint" id="otp-hint-mail">6 digits remaining</div>
+       {% if errors %}
+         {% if errors.code %}
+           <div class="iam-field-error" role="alert"><span aria-hidden="true">⚠</span> {{ errors.code }}</div>
+         {% endif %}
+       {% endif %}
+     </div>
 
-    <div class="iam-btn-row">
-      <button type="button" class="iam-btn iam-btn-secondary"
-              onclick="window.location='/signup?flow_id={{ flow_id }}'">← Back</button>
-      <button type="submit" class="iam-btn iam-btn-gradient-emerald">Verify Code</button>
-    </div>
+     <div class="iam-btn-row">
+       <button type="button" class="iam-btn iam-btn-secondary"
+               onclick="window.location='/signup?flow_id={{ flow_id }}'">← Back</button>
+       <button type="submit" class="iam-btn iam-btn-gradient-emerald" id="btn-verify-mail">Verify Code</button>
+     </div>
 
     <button type="button" class="iam-link-muted iam-text-center"
             style="background:none;border:none;cursor:pointer;padding:0.25rem;width:100%;"

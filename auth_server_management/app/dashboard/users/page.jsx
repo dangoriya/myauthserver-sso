@@ -50,7 +50,8 @@ export default function UserManagementPage() {
   // Confirmation modal states for destructive actions
   const [deleteConfirmUser, setDeleteConfirmUser] = useState(null);
   const [reset2FAConfirmUser, setReset2FAConfirmUser] = useState(null);
-  const [actionLoading, setActionLoading] = useState(null); // 'delete' | 'reset-2fa' | null
+  const [disableConfirmUser, setDisableConfirmUser] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null); // 'delete' | 'reset-2fa' | 'disable' | null
 
   const fetchEnforce2FA = async () => {
     try {
@@ -252,13 +253,26 @@ export default function UserManagementPage() {
     }
   };
 
-  const toggleUserStatus = async (user) => {
-    await fetchAuthed(`/api/v1/admin/users/${user.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_active: !user.is_active })
-    });
-    fetchUsers();
+  const confirmDisableUser = async () => {
+    if (!disableConfirmUser) return;
+    setActionLoading('disable');
+    try {
+      const res = await fetchAuthed(`/api/v1/admin/users/${disableConfirmUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !disableConfirmUser.is_active })
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'Failed to update user status');
+      }
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(null);
+      setDisableConfirmUser(null);
+    }
   };
 
   const resetUser2FA = async (user) => {
@@ -491,12 +505,12 @@ export default function UserManagementPage() {
                         ✏️ Edit
                       </button>
 
-                  <button
-                    onClick={() => toggleUserStatus(u)}
-                    className={`text-xs px-3 py-1.5 rounded-lg border transition ${u.is_active ? 'border-rose-500/30 text-rose-400 hover:bg-rose-500/10' : 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10'}`}
-                  >
-                    {u.is_active ? 'Disable' : 'Enable'}
-                  </button>
+                   <button
+                     onClick={() => setDisableConfirmUser(u)}
+                     className={`text-xs px-3 py-1.5 rounded-lg border transition ${u.is_active ? 'border-rose-500/30 text-rose-400 hover:bg-rose-500/10' : 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10'}`}
+                   >
+                     {u.is_active ? 'Disable' : 'Enable'}
+                   </button>
 
                   {isAdmin && (
                     <>
@@ -795,9 +809,38 @@ export default function UserManagementPage() {
           <li>The user will no longer be able to sign in.</li>
           <li>Any active sessions will be invalidated.</li>
         </ul>
-      </TailwindModal>
+       </TailwindModal>
 
-      {/* Reset 2FA Confirmation Modal (Admin only) */}
+       {/* Disable/Enable User Confirmation Modal (Admin only) */}
+       <TailwindModal
+         open={!!disableConfirmUser}
+         onClose={() => setDisableConfirmUser(null)}
+         onConfirm={confirmDisableUser}
+         title={disableConfirmUser?.is_active ? 'Disable User Account?' : 'Enable User Account?'}
+         description={`This action affects ${disableConfirmUser?.email || 'user'}.`}
+         icon={disableConfirmUser?.is_active ? '🚫' : '✅'}
+         tone={disableConfirmUser?.is_active ? 'rose' : 'emerald'}
+         confirmLabel={disableConfirmUser?.is_active ? 'Disable Account' : 'Enable Account'}
+         cancelLabel="Cancel"
+         loading={actionLoading === 'disable'}
+       >
+         <ul className="space-y-2 list-disc list-inside text-slate-300">
+           {disableConfirmUser?.is_active ? (
+             <>
+               <li>Disabling this user prevents them from signing in.</li>
+               <li>Active sessions remain valid until they expire.</li>
+               <li>The account can be re-enabled at any time from this screen.</li>
+             </>
+           ) : (
+             <>
+               <li>Re-enabling this user restores their access immediately.</li>
+               <li>The user will be able to sign in again.</li>
+             </>
+           )}
+         </ul>
+       </TailwindModal>
+
+       {/* Reset 2FA Confirmation Modal (Admin only) */}
       <TailwindModal
         open={!!reset2FAConfirmUser}
         onClose={() => setReset2FAConfirmUser(null)}
