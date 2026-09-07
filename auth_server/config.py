@@ -16,12 +16,18 @@ class Settings(BaseSettings):
     
     REDIS_HOST: str = "redis"
     REDIS_PORT: int = 6379
+    REDIS_PASSWORD: str = ""
     REDIS_URL: str = ""
 
     @model_validator(mode="after")
     def build_redis_url(self):
         if not self.REDIS_URL:
-            self.REDIS_URL = f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
+            if self.REDIS_PASSWORD:
+                from urllib.parse import quote_plus
+                encoded_password = quote_plus(self.REDIS_PASSWORD)
+                self.REDIS_URL = f"redis://:{encoded_password}@{self.REDIS_HOST}:{self.REDIS_PORT}/0"
+            else:
+                self.REDIS_URL = f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
         return self
     
     @model_validator(mode="after")

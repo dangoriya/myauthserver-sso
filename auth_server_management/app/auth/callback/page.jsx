@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { setSession, setStoredUser } from '@/app/lib/auth';
 
@@ -7,27 +7,32 @@ export default function AuthCallbackPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [error, setError] = useState('');
-
-  const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
-
-  const exchangedRef = useState(false);
+  const exchangedRef = useRef(false);
 
   useEffect(() => {
     const errorParam = searchParams.get('error');
     if (errorParam) {
-      setError(errorParam);
+      setError(searchParams.get('error_description') || errorParam);
       return;
     }
 
     const code = searchParams.get('code');
-
     if (!code) {
+      // If no code but user is already logged in, send to dashboard
+      const stored = getStoredUser();
+      if (stored) {
+        window.location.replace(stored.is_admin || stored.role === 'admin' ? '/dashboard' : '/dashboard/profile');
+        return;
+      }
       setError('No authorization code provided.');
       return;
     }
 
-    // Prevent double execution in React Strict Mode
-    if (window._exchangedCode === code) return;
+    // Check if this exact code was already exchanged in this tab
+    if (exchangedRef.current || window._exchangedCode === code) {
+      return;
+    }
+    exchangedRef.current = true;
     window._exchangedCode = code;
 
     async function exchangeCode() {
@@ -47,8 +52,14 @@ export default function AuthCallbackPage() {
         });
 
         if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.detail || 'Token exchange failed');
+          const data = await res.json().catch(() => ({}));
+          // If code was already consumed but we already have an active session, navigate to dashboard
+          const stored = getStoredUser();
+          if (stored) {
+            window.location.replace(stored.is_admin || stored.role === 'admin' ? '/dashboard' : '/dashboard/profile');
+            return;
+          }
+          throw new Error(data.detail || data.error || 'Token exchange failed');
         }
 
         const data = await res.json();
@@ -57,41 +68,42 @@ export default function AuthCallbackPage() {
         const refreshToken = data.refresh_token;
         const expiresIn = data.expires_in || 900;
 
-        // Parse JWT payload to extract role & attributes
+        // Parse JWT payload to extract user info & role
         let userPayload = {};
         try {
-          const payloadBase64 = (idToken || accessToken).split('.')[1];
-          userPayload = JSON.parse(atob(payloadBase64));
+          const rawToken = idToken || accessToken;
+          const payloadBase64 = rawToken.split('.')[1];
+          const normalized = payloadBase64.replace(/-/g, '+').replace(/_/g, '/');
+          userPayload = JSON.parse(atob(normalized));
         } catch (e) {
           console.error('Failed to parse JWT payload', e);
         }
 
+        const isAdmin = !!userPayload.is_admin;
+        const userRole = userPayload.role || (isAdmin ? 'admin' : 'normal-user');
         const userObj = {
           id: userPayload.sub,
           email: userPayload.email,
           name: userPayload.name,
           picture: userPayload.picture,
-          role: userPayload.role || (userPayload.is_admin ? 'admin' : 'normal-user'),
-          is_admin: !!userPayload.is_admin,
-          provider: 'google'
+          role: userRole,
+          is_admin: isAdmin,
+          provider: 'local',
         };
 
-        // Store sensitive tokens in HttpOnly cookies via Next.js server route
+        // 1. Store session cookies on the server via /api/auth/session
         await setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
           expires_in: expiresIn,
         });
 
-        // Store non-sensitive display data in localStorage for UI
+        // 2. Store non-sensitive user display data in localStorage for UI
         setStoredUser(userObj);
 
-        // Admin users go to system overview dashboard; normal users go directly to their profile page
-        if (userObj.is_admin || userObj.role === 'admin') {
-          router.replace('/dashboard');
-        } else {
-          router.replace('/dashboard/profile');
-        }
+        // 3. Hard navigate to dashboard to replace callback URL in browser history
+        const dest = (isAdmin || userRole === 'admin') ? '/dashboard' : '/dashboard/profile';
+        window.location.replace(dest);
       } catch (err) {
         console.error('Callback error:', err);
         setError(err.message || 'Authentication error');
@@ -99,7 +111,7 @@ export default function AuthCallbackPage() {
     }
 
     exchangeCode();
-  }, [searchParams, router, authServerUrl]);
+  }, [searchParams, router]);
 
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-white">
@@ -117,7 +129,7 @@ export default function AuthCallbackPage() {
       ) : (
         <div className="flex flex-col items-center space-y-3">
           <div className="w-10 h-10 border-4 border-emerald-500/20 border-t-emerald-400 rounded-full animate-spin" />
-          <p className="text-sm font-medium text-slate-300">Completing Sign In via Google OAuth...</p>
+          <p className="text-sm font-medium text-slate-300">Completing Sign In...</p>
         </div>
       )}
     </div>

@@ -8,9 +8,14 @@ logger = logging.getLogger(__name__)
 _memory_store = {}
 
 try:
-    redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+    redis_kwargs = {"decode_responses": True}
+    if settings.REDIS_PASSWORD:
+        redis_kwargs["password"] = settings.REDIS_PASSWORD
+    redis_client = redis.Redis.from_url(settings.REDIS_URL, **redis_kwargs)
+    redis_client.ping()
+    logger.info("Successfully connected and authenticated with Redis.")
 except Exception as e:
-    logger.warning(f"Redis initialization warning: {e}")
+    logger.warning(f"Redis initialization warning: {e}. Falling back to in-memory store.")
     redis_client = None
 
 def set_cache(key: str, value, ttl: int = 300):

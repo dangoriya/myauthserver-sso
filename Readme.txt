@@ -48,7 +48,11 @@ Configure the environment variables in docker-compose.yml or .env:
 
 # Database & Redis Configuration
 DATABASE_URL=postgresql://postgres:postgres@postgresdb:5432/auth_db
-REDIS_URL=redis://redis:6379/0
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_PASSWORD=your_redis_password
+# Alternatively, specify a full connection URL:
+# REDIS_URL=redis://:your_redis_password@redis:6379/0
 
 # App URLs
 AUTH_SERVER_URL=http://localhost:8000

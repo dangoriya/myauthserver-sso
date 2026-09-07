@@ -13,7 +13,11 @@ export async function POST(request) {
 
     const response = NextResponse.json({ success: true });
     const maxAge = expires_in || 86400 * 7;
-    const isSecure = process.env.NODE_ENV === 'production';
+    // Safari strictly drops cookies marked Secure if received over HTTP (e.g. http://localhost:3005).
+    // Only set Secure if explicitly configured or running under HTTPS.
+    const isSecure =
+      process.env.COOKIE_SECURE === 'true' ||
+      (process.env.NEXT_PUBLIC_MANAGEMENT_URL || '').startsWith('https://');
 
     if (access_token) {
       response.cookies.set('mgmt_access_token', access_token, {

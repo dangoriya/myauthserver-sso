@@ -102,6 +102,11 @@ def run_migrations(reset: bool = False):
 
         # Seed Auth Server Management Client App
         management_redirect_uri = f"{settings.MANAGEMENT_URL.rstrip('/')}/auth/callback"
+        mgmt_redirect_uris = (
+            f"{management_redirect_uri},"
+            f"{settings.MANAGEMENT_URL.rstrip('/')}/api/auth/callback,"
+            f"{settings.MANAGEMENT_URL.rstrip('/')}"
+        )
         mgmt_post_logout_uri = (
             f"{settings.MANAGEMENT_URL.rstrip('/')}/logged-out,"
             f"{settings.MANAGEMENT_URL.rstrip('/')}"
@@ -112,7 +117,7 @@ def run_migrations(reset: bool = False):
                 client_id="auth_management_app",
                 client_secret="auth_management_secret",
                 client_name="Auth Server Management",
-                redirect_uris=f"{management_redirect_uri},{settings.MANAGEMENT_URL.rstrip('/')}",
+                redirect_uris=mgmt_redirect_uris,
                 post_logout_redirect_uris=mgmt_post_logout_uri,
                 backchannel_logout_uris="",
                 backchannel_logout_enabled=False,
@@ -122,10 +127,11 @@ def run_migrations(reset: bool = False):
             db.add(mgmt_client)
             print(f"  ✅ Auth Server Management App registered: auth_management_app ({management_redirect_uri})")
         else:
+            mgmt_client.redirect_uris = mgmt_redirect_uris
             mgmt_client.post_logout_redirect_uris = mgmt_post_logout_uri
             mgmt_client.backchannel_logout_enabled = False
             db.commit()
-            print(f"  🔧 Updated Auth Server Management App with OIDC logout config")
+            print(f"  🔧 Updated Auth Server Management App with OIDC logout config ({management_redirect_uri})")
 
         db.commit()
         print("🎉 [MIGRATION] Database schema & master data setup completed successfully!")

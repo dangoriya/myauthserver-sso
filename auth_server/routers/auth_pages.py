@@ -120,6 +120,7 @@ def _signin_href() -> str:
 
 
 def _google_href() -> str:
+    # URL-encode the redirect URI so it nests safely inside /authorize
     enc = urllib.parse.quote(f"{settings.MANAGEMENT_URL.rstrip('/')}/auth/callback")
     return f"/auth/google?client_id={DEFAULT_AUTH_CLIENT}&redirect_uri={enc}"
 
