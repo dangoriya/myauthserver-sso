@@ -87,6 +87,10 @@ export default function DashboardLayout({ children }) {
   const roleName = currentUser?.role || (isAdmin ? 'Admin' : 'User');
   const displayName = currentUser?.name || currentUser?.email || 'User';
 
+  // Public-facing auth server URL (used to build links to Home / Privacy / Terms)
+  const authServerUrl =
+    process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.dilipdangoriya.com.np';
+
   const navItems = isAdmin ? [
     { label: 'Overview',        href: '/dashboard',                 Icon: LayoutDashboard },
     { label: 'User Management', href: '/dashboard/users',           Icon: Users },
@@ -163,33 +167,36 @@ export default function DashboardLayout({ children }) {
                 </Link>
               );
             })}
+
           </nav>
         </div>
 
         {/* Bottom user info + logout */}
         <div className="pt-5 border-t border-slate-800/80 mt-auto space-y-3">
-          {/* Public pages (Home / Privacy / Terms) — link to the auth_server */}
-          <div className="px-1 space-y-1">
-            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Public pages</p>
-            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+          {/* Auth Server — quick links (compact, one line) */}
+          <div className="px-1 space-y-1.5">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Auth Server</p>
+            <div className="flex items-center gap-2.5 text-xs">
               <a
-                href={`${process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.dilipdangoriya.com.np'}/`}
+                href={`${authServerUrl}/`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-slate-400 hover:text-emerald-400 transition"
               >
                 Home
               </a>
+              <span className="text-slate-700">·</span>
               <a
-                href={`${process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.dilipdangoriya.com.np'}/privacy`}
+                href={`${authServerUrl}/privacy`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-slate-400 hover:text-emerald-400 transition"
               >
                 Privacy
               </a>
+              <span className="text-slate-700">·</span>
               <a
-                href={`${process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.dilipdangoriya.com.np'}/terms`}
+                href={`${authServerUrl}/terms`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-slate-400 hover:text-emerald-400 transition"
