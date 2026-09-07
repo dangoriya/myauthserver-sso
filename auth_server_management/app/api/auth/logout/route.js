@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/auth/logout
  *
@@ -13,13 +15,13 @@ export async function GET() {
   const authServerUrl = (
     process.env.AUTH_SERVER_URL ||
     process.env.NEXT_PUBLIC_AUTH_SERVER_URL ||
-    'http://localhost:9000'
+    'https://auth.example.com'
   ).replace(/\/+$/, '');
 
   const managementUrl = (
     process.env.MANAGEMENT_URL ||
     process.env.NEXT_PUBLIC_MANAGEMENT_URL ||
-    'http://localhost:3005'
+    'https://iam.example.com'
   ).replace(/\/+$/, '');
 
   const postLogoutUri = `${managementUrl}/logged-out`;
