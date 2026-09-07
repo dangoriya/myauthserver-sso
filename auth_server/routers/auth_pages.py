@@ -5,7 +5,9 @@ Jinja2-rendered authentication pages:
   - /signup/step/2     (POST)           — submit 6-digit code
   - /signup/step/3     (POST)           — submit password
   - /signup/step/4     (POST)           — submit 2FA code (optional)
-  - /signup/step/skip-2fa (GET)         — skip 2FA and finalize
+   - /signup/step/skip-2fa (GET)         — skip 2FA and finalize
+   - /forgot-password    (GET, POST)    — request a password reset link
+   - /reset-password     (GET, POST)    — set a new password from a reset link
 
 The login (GET /authorize and POST /login-submit) is in routers/oidc.py
 and renders Jinja2 templates via security.render_template.
@@ -27,8 +29,9 @@ import urllib.parse
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, Request, Response
+from fastapi import APIRouter, Depends, Form, Query, Request, Response
 from fastapi.responses import RedirectResponse
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -67,6 +70,33 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # redirect_uri is registered. Using a generic default would 400 out with
 # "redirect URI not registered" as we saw during testing.
 DEFAULT_AUTH_CLIENT = "auth_management_app"
+
+
+# ---------------------------------------------------------------------------
+# Password reset (forgot-password) token helpers
+# ---------------------------------------------------------------------------
+# Signed, time-limited URL tokens (stateless, no Redis) for the
+# unauthenticated "forgot password" flow. Tokens expire after 10 minutes.
+_PWD_RESET_SALT = "iam-pwd-reset"
+_pwd_reset_serializer = URLSafeTimedSerializer(
+    settings.SECRET_KEY + "-pwd-reset-v1", salt=_PWD_RESET_SALT
+)
+PWD_RESET_MAX_AGE = 600  # 10 minutes
+
+
+def _create_reset_token(user_id: str, email: str) -> str:
+    return _pwd_reset_serializer.dumps({"uid": str(user_id), "email": email})
+
+
+def _verify_reset_token(token: str) -> Optional[dict]:
+    if not token:
+        return None
+    try:
+        return _pwd_reset_serializer.loads(token, max_age=PWD_RESET_MAX_AGE)
+    except SignatureExpired:
+        return None
+    except BadSignature:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -517,4 +547,184 @@ def _finalize_signup(
     target = f"{settings.MANAGEMENT_URL.rstrip('/')}/dashboard/profile?welcome=1"
     audit("signup_redirect_to_mgmt", request, user_id=user.id, email=user.email,
           extra={"target": target})
+
+    # Notify the user that their account was successfully created (after 2FA
+    # setup or after skipping 2FA). Non-fatal: never block the sign-in handoff
+    # if email delivery fails.
+    try:
+        EmailService.send_account_created_notification(user.email, user.name or "")
+        audit("signup_account_created_email_sent", request, user_id=user.id, email=user.email)
+    except Exception as e:
+        logger.warning("Failed to send account-created email to %s: %s", user.email, e)
+
     return RedirectResponse(url=target, status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Forgot password (unauthenticated flow)
+#   GET  /forgot-password   — email entry form
+#   POST /forgot-password   — send a reset *link* to the user's email
+#   GET  /reset-password     — render the new-password form (token in query)
+#   POST /reset-password     — validate token + set the new password
+# ---------------------------------------------------------------------------
+@router.get("/forgot-password")
+async def forgot_password_get(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    request.state.db = db
+    return render_template(
+        request, "auth/forgot_password.html",
+        email="", error=None, notice=None,
+        google_enabled=_get_google_enabled(db), google_href=_google_href(),
+        signin_href=_signin_href(),
+    )
+
+
+@router.post("/forgot-password")
+async def forgot_password_post(
+    request: Request,
+    response: Response,
+    email: str = Form(...),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    await validate_csrf(request, form_token=csrf_token)
+    request.state.db = db
+    email_clean = (email or "").strip().lower()
+
+    if not EMAIL_RE.match(email_clean):
+        return render_template(
+            request, "auth/forgot_password.html", status_code=400,
+            email=email, error="Please enter a valid email address.",
+            google_enabled=_get_google_enabled(db), google_href=_google_href(),
+            signin_href=_signin_href(),
+        )
+
+    # Rate-limit OTP/link issuance per IP + email (same limiter used for OTP).
+    try:
+        rate_limit_otp(request, email_clean)
+    except Exception:
+        return render_template(
+            request, "auth/forgot_password.html", status_code=429,
+            email="", error="Too many attempts. Please wait a few minutes.",
+            google_enabled=_get_google_enabled(db), google_href=_google_href(),
+            signin_href=_signin_href(),
+        )
+
+    user = db.query(User).filter(User.email == email_clean).first()
+    if user and user.is_active:
+        token = _create_reset_token(user.id, user.email)
+        reset_link = f"{settings.AUTH_SERVER_URL.rstrip('/')}/reset-password?token={token}"
+        try:
+            EmailService.send_password_reset_link(
+                user.email, user.name or "", reset_link
+            )
+            audit("pw_reset_link_sent", request, user_id=user.id, email=user.email)
+        except Exception as e:
+            logger.exception("Failed to send password reset link to %s: %s", user.email, e)
+
+    # Always render the same notice whether or not the account exists, to
+    # avoid user enumeration via this endpoint.
+    return render_template(
+        request, "auth/forgot_password.html",
+        email="", notice="If an account with that email exists, a password reset "
+                         "link has been sent. It expires in 10 minutes.",
+        google_enabled=_get_google_enabled(db), google_href=_google_href(),
+        signin_href=_signin_href(),
+    )
+
+
+@router.get("/reset-password")
+async def reset_password_get(
+    request: Request,
+    response: Response,
+    token: str = Query(""),
+    db: Session = Depends(get_db),
+):
+    request.state.db = db
+    data = _verify_reset_token(token)
+    if not data:
+        return render_template(
+            request, "auth/reset_password.html", status_code=400,
+            token=token, error="This password reset link is invalid or has expired. "
+                              "Please request a new one.",
+            expired=True,
+            google_enabled=_get_google_enabled(db), google_href=_google_href(),
+            signin_href=_signin_href(),
+        )
+    return render_template(
+        request, "auth/reset_password.html",
+        token=token, error=None, expired=False,
+        google_enabled=_get_google_enabled(db), google_href=_google_href(),
+        signin_href=_signin_href(),
+    )
+
+
+@router.post("/reset-password")
+async def reset_password_post(
+    request: Request,
+    response: Response,
+    token: str = Form(...),
+    password: str = Form(...),
+    confirm: str = Form(...),
+    csrf_token: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    await validate_csrf(request, form_token=csrf_token)
+    request.state.db = db
+
+    # Validate the signed token first (expiry + integrity).
+    data = _verify_reset_token(token)
+    if not data:
+        return render_template(
+            request, "auth/reset_password.html", status_code=400,
+            token=token, error="This password reset link is invalid or has expired. "
+                              "Please request a new one.",
+            expired=True,
+            google_enabled=_get_google_enabled(db), google_href=_google_href(),
+            signin_href=_signin_href(),
+        )
+
+    # Password policy mirrors signup (8+ chars, >=1 letter, >=1 digit).
+    errors = {}
+    if len(password or "") < 8:
+        errors["password"] = "Password must be at least 8 characters."
+    elif not re.search(r"[A-Za-z]", password):
+        errors["password"] = "Password must include at least one letter."
+    elif not re.search(r"\d", password):
+        errors["password"] = "Password must include at least one number."
+    if not errors and (password or "") != (confirm or ""):
+        errors["confirm"] = "Passwords do not match."
+
+    if errors:
+        return render_template(
+            request, "auth/reset_password.html", status_code=400,
+            token=token, expired=False, errors=errors,
+            google_enabled=_get_google_enabled(db), google_href=_google_href(),
+            signin_href=_signin_href(),
+        )
+
+    user = db.query(User).filter(User.id == data["uid"]).first()
+    if not user:
+        return render_template(
+            request, "auth/reset_password.html", status_code=400,
+            token=token, error="The user for this reset link could not be found. "
+                              "Please request a new reset link.",
+            expired=True,
+            google_enabled=_get_google_enabled(db), google_href=_google_href(),
+            signin_href=_signin_href(),
+        )
+
+    user.hashed_password = get_password_hash(password)
+    db.commit()
+    db.refresh(user)
+
+    audit("password_reset_completed", request, user_id=user.id, email=user.email)
+    return render_template(
+        request, "auth/reset_password.html",
+        token="", success=True,
+        google_enabled=_get_google_enabled(db), google_href=_google_href(),
+        signin_href=_signin_href(),
+    )
