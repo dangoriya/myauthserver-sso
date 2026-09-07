@@ -389,6 +389,7 @@ main.iam-wrapper { display: block; }
   font-size: 0.82rem;
   display: flex; align-items: center; gap: 0.5rem;
   animation: shake 0.35s ease;
+  margin-bottom: 1rem;
 }
 .iam-banner-error {
   background: rgba(244, 63, 94, 0.08);

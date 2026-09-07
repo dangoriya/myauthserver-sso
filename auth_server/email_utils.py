@@ -98,6 +98,7 @@ class EmailService:
         <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; background-color: #0f172a; border-radius: 16px; color: #f8fafc;">
             <div style="text-align: center; margin-bottom: 20px;">
                 <h1 style="color: #10b981; margin: 0;">IAM Auth Server</h1>
+                <p style="color: #64748b; font-size: 11px; margin-top: 4px;">{settings.AUTH_SERVER_URL}</p>
                 <p style="color: #94a3b8; font-size: 14px;">Identity & Access Control System</p>
             </div>
             <div style="background-color: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155;">
