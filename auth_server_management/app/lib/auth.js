@@ -103,17 +103,11 @@ export async function fetchAuthed(url, options = {}) {
 /**
  * Initiate centralized SSO logout:
  * 1. Calls the central auth server /api/v1/sso/logout endpoint via the BFF proxy.
- * 2. Clears the local HttpOnly session cookies and localStorage user info.
- * 3. Redirects the browser to auth_server /logout to terminate the central SSO cookie,
- *    which safely redirects the browser to /logged-out.
+ * 2. Clears local storage state.
+ * 3. Navigates to /api/auth/logout which dynamically uses the runtime AUTH_SERVER_URL
+ *    from server environment variables and redirects to the central auth server /logout.
  */
 export async function centralLogout({ redirectTo } = {}) {
-  const authServerUrl =
-    process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:9000';
-  const managementUrl =
-    process.env.NEXT_PUBLIC_MANAGEMENT_URL ||
-    (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3005');
-
   try {
     await fetchAuthed('/api/v1/sso/logout', {
       method: 'POST',
@@ -121,17 +115,17 @@ export async function centralLogout({ redirectTo } = {}) {
       body: JSON.stringify({}),
     }).catch(() => {});
   } catch {
-    // Ignore network or logout failure; proceed to clear local state
+    // Ignore error
   }
 
   await clearSession();
 
-  const postLogoutUri = `${managementUrl.replace(/\/+$/, '')}/logged-out`;
-  const logoutTarget =
-    redirectTo ||
-    `${authServerUrl.replace(/\/+$/, '')}/logout?client_id=auth_management_app&post_logout_redirect_uri=${encodeURIComponent(postLogoutUri)}`;
-
   if (typeof window !== 'undefined') {
-    window.location.href = logoutTarget;
+    if (redirectTo) {
+      window.location.href = redirectTo;
+    } else {
+      // Use the dynamic server-side logout route that reads runtime AUTH_SERVER_URL
+      window.location.href = '/api/auth/logout';
+    }
   }
 }

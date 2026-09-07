@@ -9,10 +9,15 @@ export const metadata = {
 // auth_server's /authorize endpoint so they sign in centrally. The auth_server
 // will set the SSO session cookie and redirect back to the management dashboard.
 export default function HomePage() {
-  const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:9000';
-  const managementUrl = process.env.NEXT_PUBLIC_MANAGEMENT_URL || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3005');
+  const authServerUrl =
+    process.env.AUTH_SERVER_URL ||
+    process.env.NEXT_PUBLIC_AUTH_SERVER_URL ||
+    'http://localhost:9000';
+  const managementUrl =
+    process.env.MANAGEMENT_URL ||
+    process.env.NEXT_PUBLIC_MANAGEMENT_URL ||
+    (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3005');
   const redirectUri = `${managementUrl.replace(/\/+$/, '')}/auth/callback`;
-  // Use client_id = auth_management_app which is pre-registered with the auth_server
   const target = `${authServerUrl.replace(/\/+$/, '')}/authorize?client_id=auth_management_app&redirect_uri=${encodeURIComponent(redirectUri)}`;
   redirect(target);
 }

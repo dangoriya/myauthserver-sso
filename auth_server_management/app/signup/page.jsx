@@ -11,6 +11,9 @@ export const metadata = {
 //     /dashboard/profile?welcome=1 where the user can set / change password
 //     and configure 2FA in the management UI.
 export default function SignupPage() {
-  const authServerUrl = process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'http://localhost:8000';
-  redirect(`${authServerUrl}/signup`);
+  const authServerUrl =
+    process.env.AUTH_SERVER_URL ||
+    process.env.NEXT_PUBLIC_AUTH_SERVER_URL ||
+    'http://localhost:9000';
+  redirect(`${authServerUrl.replace(/\/+$/, '')}/signup`);
 }
