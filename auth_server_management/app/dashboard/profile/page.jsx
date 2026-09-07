@@ -113,12 +113,12 @@ export default function ProfilePage() {
     setPwdMsg('');
     setPwdErr('');
 
-    if (setPwdNew !== setPwdConfirm) {
-      setPwdErr('Passwords do not match');
+    if (!isValidPassword(setPwdNew)) {
+      setPwdErr('Password must be at least 8 characters and include at least one letter and one number.');
       return;
     }
-    if (setPwdNew.length < 6) {
-      setPwdErr('Password must be at least 6 characters long');
+    if (setPwdNew !== setPwdConfirm) {
+      setPwdErr('Passwords do not match');
       return;
     }
 
@@ -230,12 +230,12 @@ export default function ProfilePage() {
     setPwdMsg('');
     setPwdErr('');
 
-    if (newPassword !== confirmPassword) {
-      setPwdErr('New password and confirmation password do not match');
+    if (!isValidPassword(newPassword)) {
+      setPwdErr('Password must be at least 8 characters and include at least one letter and one number.');
       return;
     }
-    if (newPassword.length < 6) {
-      setPwdErr('Password must be at least 6 characters long');
+    if (newPassword !== confirmPassword) {
+      setPwdErr('New password and confirmation password do not match');
       return;
     }
 
@@ -464,6 +464,11 @@ export default function ProfilePage() {
     return <div className="p-8 text-center text-slate-400">Loading user profile...</div>;
   }
 
+  // Password policy — mirrors the auth_server set-password / reset-password rule
+  // (8+ characters, at least one letter, at least one digit).
+  const isValidPassword = (pwd) =>
+    typeof pwd === 'string' && pwd.length >= 8 && /[A-Za-z]/.test(pwd) && /\d/.test(pwd);
+
   // Inline input validation styling helper with red glow
   const inputClass = (isInvalid = false) =>
     `w-full px-3.5 py-2.5 bg-slate-800 border rounded-xl text-white text-sm focus:outline-none transition-all duration-200 ${
@@ -600,11 +605,11 @@ export default function ProfilePage() {
                   <input
                     type={showSetPwdNew ? 'text' : 'password'}
                     required
-                    minLength={6}
+                    minLength={8}
                     value={setPwdNew}
                     onChange={(e) => setSetPwdNew(e.target.value)}
-                    placeholder="Minimum 6 characters"
-                    className={inputClass(setPwdNew.length > 0 && setPwdNew.length < 6)}
+                    placeholder="At least 8 characters, with a letter and a number"
+                    className={inputClass(setPwdNew.length > 0 && !isValidPassword(setPwdNew))}
                   />
                   <button type="button" onClick={() => setShowSetPwdNew(!showSetPwdNew)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
                     {showSetPwdNew ? '👁️' : '🙈'}
@@ -618,11 +623,11 @@ export default function ProfilePage() {
                   <input
                     type={showSetPwdConfirm ? 'text' : 'password'}
                     required
-                    minLength={6}
+                    minLength={8}
                     value={setPwdConfirm}
                     onChange={(e) => setSetPwdConfirm(e.target.value)}
                     placeholder="Re-enter new password"
-                    className={inputClass(setPwdConfirm.length > 0 && (setPwdConfirm !== setPwdNew || setPwdConfirm.length < 6))}
+                    className={inputClass(setPwdConfirm.length > 0 && setPwdConfirm !== setPwdNew)}
                   />
                   <button type="button" onClick={() => setShowSetPwdConfirm(!showSetPwdConfirm)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
                     {showSetPwdConfirm ? '👁️' : '🙈'}
@@ -654,7 +659,7 @@ export default function ProfilePage() {
                         type={showOldPwd ? 'text' : 'password'}
                         required
                         value={oldPassword}
-                        onChange={(e) => setOldPassword(e.target.value)}
+                        onChange={(e) => { setOldPassword(e.target.value); setPwdErr(''); }}
                         placeholder="Enter current password"
                         className={inputClass(pwdErr.length > 0)}
                       />
@@ -729,11 +734,11 @@ export default function ProfilePage() {
                       <input
                         type={showNewPwd ? 'text' : 'password'}
                         required
-                        minLength={6}
+                        minLength={8}
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="Minimum 6 characters"
-                        className={inputClass(newPassword.length > 0 && newPassword.length < 6)}
+                        placeholder="At least 8 characters, with a letter and a number"
+                        className={inputClass(newPassword.length > 0 && !isValidPassword(newPassword))}
                       />
                       <button type="button" onClick={() => setShowNewPwd(!showNewPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
                         {showNewPwd ? '👁️' : '🙈'}
@@ -747,11 +752,11 @@ export default function ProfilePage() {
                       <input
                         type={showConfirmPwd ? 'text' : 'password'}
                         required
-                        minLength={6}
+                        minLength={8}
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                         placeholder="Re-enter new password"
-                        className={inputClass(confirmPassword.length > 0 && (confirmPassword !== newPassword || confirmPassword.length < 6))}
+                        className={inputClass(confirmPassword.length > 0 && confirmPassword !== newPassword)}
                       />
                       <button type="button" onClick={() => setShowConfirmPwd(!showConfirmPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
                         {showConfirmPwd ? '👁️' : '🙈'}
