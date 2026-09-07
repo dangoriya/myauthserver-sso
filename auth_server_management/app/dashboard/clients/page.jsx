@@ -76,18 +76,31 @@ export default function ClientAppsPage() {
                 </span>
               </div>
 
-              <div className="space-y-2 text-xs font-mono bg-slate-950 p-4 rounded-xl border border-slate-800 text-slate-300 my-4">
+              <div className="space-y-3 text-xs font-mono bg-slate-950 p-4 rounded-xl border border-slate-800 text-slate-300 my-4 overflow-hidden">
                 <div>
-                  <span className="text-slate-500 block">Client ID:</span>
-                  <span className="text-emerald-400">{c.client_id}</span>
+                  <span className="text-slate-500 block font-sans text-[11px] uppercase tracking-wider mb-0.5">Client ID</span>
+                  <span className="text-emerald-400 break-all font-semibold select-all">{c.client_id}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Client Secret:</span>
-                  <span className="text-indigo-400">{c.client_secret}</span>
+                  <span className="text-slate-500 block font-sans text-[11px] uppercase tracking-wider mb-0.5">Client Secret</span>
+                  <span className="text-indigo-400 break-all select-all">{c.client_secret}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block">Redirect URIs:</span>
-                  <span className="text-purple-400">{c.redirect_uris}</span>
+                  <span className="text-slate-500 block font-sans text-[11px] uppercase tracking-wider mb-1.5">Redirect URIs</span>
+                  <div className="space-y-1.5">
+                    {c.redirect_uris ? (
+                      c.redirect_uris.split(',').filter(Boolean).map((uri, idx) => (
+                        <div
+                          key={idx}
+                          className="text-purple-300 bg-purple-950/40 border border-purple-500/20 px-2.5 py-1.5 rounded-lg break-all text-[11px] leading-relaxed select-all"
+                        >
+                          {uri.trim()}
+                        </div>
+                      ))
+                    ) : (
+                      <span className="text-slate-600 italic font-sans text-xs">None configured</span>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
