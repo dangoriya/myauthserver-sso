@@ -107,11 +107,9 @@ export default function DashboardLayout({ children }) {
       {/* Mobile Top Header */}
       <header className="md:hidden flex items-center justify-between p-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-30">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-400 to-indigo-500 flex items-center justify-center font-bold text-white shadow-md text-xs">
-            IAM
+            <img src="/logo.svg" alt="" width="36" height="36" className="rounded-xl shadow-md" />
+            <h2 className="font-bold text-sm bg-gradient-to-r from-emerald-400 to-indigo-300 bg-clip-text text-transparent">IAM Portal</h2>
           </div>
-          <h2 className="font-bold text-sm bg-gradient-to-r from-emerald-400 to-indigo-300 bg-clip-text text-transparent">IAM Portal</h2>
-        </div>
         <button
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
           className="p-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-white"
@@ -138,9 +136,7 @@ export default function DashboardLayout({ children }) {
         <div>
           {/* Logo */}
           <div className="hidden md:flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-400 to-indigo-500 flex items-center justify-center font-bold text-lg text-white shadow-md">
-              IAM
-            </div>
+            <img src="/logo.svg" alt="" width="40" height="40" className="rounded-xl shadow-md" />
             <div>
               <h2 className="font-bold bg-gradient-to-r from-emerald-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">IAM System</h2>
               <p className="text-xs text-slate-400">Identity & Access Control</p>

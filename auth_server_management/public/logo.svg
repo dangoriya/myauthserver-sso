@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  IAM Auth Server — Application Logo
+  200x200 viewBox. Square (renders cleanly at 120x120 / 48x48).
+  For Google Auth Platform submission, export to a 120x120 PNG.
+
+  Design: "DD" monogram (Dilip Dangoriya) — unique to the brand owner,
+  not a generic security symbol, so it should pass Google's
+  "uniquely identifies your brand" branding check.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="DD — IAM Auth Server">
+  <defs>
+    <linearGradient id="ddbg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="50%" stop-color="#14b8a6"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="10" y="10" width="180" height="180" rx="40" fill="url(#ddbg)"/>
+
+  <!--
+    "DD" monogram. Using a robust system-font stack so the monogram
+    renders consistently across browsers and crawlers. The kerning/letter-
+    spacing is tightened to overlap the two D's slightly, which is the
+    classic DD monogram style and keeps the mark compact and distinctive.
+  -->
+  <text x="100" y="100"
+        text-anchor="middle"
+        dominant-baseline="central"
+        font-family="Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
+        font-size="96"
+        font-weight="800"
+        fill="#ffffff"
+        letter-spacing="-6"
+        style="font-feature-settings: 'kern' 1, 'liga' 1;">DD</text>
+</svg>
