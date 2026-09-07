@@ -30,7 +30,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Query, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from sqlalchemy.orm import Session
 
@@ -749,3 +749,16 @@ async def privacy_get(request: Request, response: Response, db: Session = Depend
 @router.get("/terms")
 async def terms_get(request: Request, response: Response, db: Session = Depends(get_db)):
     return render_template(request, "public/terms.html", active="terms")
+
+
+# ---------------------------------------------------------------------------
+# Favicon — served at the site root (/favicon.ico) so every browser,
+# feed reader, and crawler finds it without relying on the <link> tag.
+# The file is generated from static/img/logo.png (multi-size ICO).
+# ---------------------------------------------------------------------------
+@router.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(
+        "static/img/favicon.ico",
+        media_type="image/x-icon",
+    )
