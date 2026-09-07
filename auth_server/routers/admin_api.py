@@ -181,9 +181,11 @@ class ChangePasswordSchema(BaseModel):
 class VerifyOldPasswordSchema(BaseModel):
     old_password: str
 
-class ResetPasswordConfirmSchema(BaseModel):
-    otp_code: str
+class SetNewPasswordSchema(BaseModel):
     new_password: str
+
+class VerifyOtpSchema(BaseModel):
+    otp_code: str
 
 class SetPasswordSchema(BaseModel):
     new_password: str
@@ -586,8 +588,15 @@ def password_reset_request_otp(db: Session = Depends(get_db), current_user=Depen
 
     return {"message": f"Verification code sent to your email ({user.email})."}
 
-@router.post("/user/password-reset/confirm-otp")
-def password_reset_confirm_otp(data: ResetPasswordConfirmSchema, db: Session = Depends(get_db), current_user=Depends(verify_token)):
+@router.post("/user/password-reset/verify-otp")
+def password_reset_verify_otp(data: VerifyOtpSchema, db: Session = Depends(get_db), current_user=Depends(verify_token)):
+    """Validate the email OTP and mark it as verified for this session.
+
+    Lets the management UI prompt-check the 6-digit code on its own step (so an
+    invalid code is caught immediately) before the final confirm-otp step sets
+    the new password. The OTP itself is NOT consumed here — only a short-lived
+    `otp_verified` flag is recorded, so a user can re-try the code if needed.
+    """
     user = db.query(User).filter(User.id == current_user["sub"]).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -596,11 +605,28 @@ def password_reset_confirm_otp(data: ResetPasswordConfirmSchema, db: Session = D
     if not cached or str(cached.get("otp")) != data.otp_code.strip():
         raise HTTPException(status_code=400, detail="Invalid or expired email verification code.")
 
+    set_cache(f"otp_verified:{user.id}", {"verified": True}, ttl=600)
+    return {"verified": True, "message": "Verification code is correct."}
+
+@router.post("/user/password-reset/set-new-password")
+def password_reset_set_new_password(data: SetNewPasswordSchema, db: Session = Depends(get_db), current_user=Depends(verify_token)):
+    user = db.query(User).filter(User.id == current_user["sub"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # The OTP was already validated server-side in the verify-otp step, which
+    # set a short-lived `otp_verified` flag. We do NOT re-read otp_code here —
+    # that removes the redundant second verification the user had to go through.
+    verified = get_cache(f"otp_verified:{user.id}")
+    if not verified or not verified.get("verified"):
+        raise HTTPException(status_code=400, detail="Verification not completed. Please verify your code again.")
+
     user.hashed_password = get_password_hash(data.new_password)
     db.commit()
 
     delete_cache(f"reset_password_otp:{user.id}")
     delete_cache(f"old_pwd_verified:{user.id}")
+    delete_cache(f"otp_verified:{user.id}")
 
     return {"message": "Password reset successfully!"}
 

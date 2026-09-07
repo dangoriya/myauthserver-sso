@@ -18,6 +18,7 @@ export default function ProfilePage() {
   const [pwdStep, setPwdStep] = useState(1);
   const [oldPassword, setOldPassword] = useState('');
   const [pwdOtpCode, setPwdOtpCode] = useState('');
+  const [pwdOtpVerifyLoading, setPwdOtpVerifyLoading] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showOldPwd, setShowOldPwd] = useState(false);
@@ -179,7 +180,7 @@ export default function ProfilePage() {
         throw new Error(otpData.detail || 'Failed to send OTP code to email');
       }
 
-      setPwdMsg(`Current password verified! 6-digit code sent to ${profile?.email}`);
+      setPwdMsg('');
       setPwdStep(2);
     } catch (err) {
       setPwdErr(err.message);
@@ -188,8 +189,8 @@ export default function ProfilePage() {
     }
   };
 
-  // Password Reset Step 2: Validate Email OTP Code
-  const handleVerifyPwdOtpCode = (e) => {
+  // Password Reset Step 2: Server-side validation of the 6-digit OTP code
+  const handleVerifyPwdOtpCode = async (e) => {
     e.preventDefault();
     setPwdMsg('');
     setPwdErr('');
@@ -199,8 +200,28 @@ export default function ProfilePage() {
       return;
     }
 
-    setPwdMsg('Code accepted! Now set your new password.');
-    setPwdStep(3);
+    setPwdOtpVerifyLoading(true);
+    try {
+      const res = await fetchAuthed('/api/v1/user/password-reset/verify-otp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ otp_code: pwdOtpCode })
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || 'Invalid verification code');
+      }
+
+      setPwdMsg('Code accepted! Now set your new password.');
+      setPwdStep(3);
+    } catch (err) {
+      setPwdErr(err.message);
+    } finally {
+      setPwdOtpVerifyLoading(false);
+    }
   };
 
   // Password Reset Step 3: Set New Password + Confirm Password with Email OTP
@@ -227,7 +248,6 @@ export default function ProfilePage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          otp_code: pwdOtpCode,
           new_password: newPassword
         })
       });
@@ -691,10 +711,10 @@ export default function ProfilePage() {
                     </button>
                     <button
                       type="submit"
-                      disabled={pwdOtpCode.trim().length < 6}
-                      className="flex-1 py-2.5 bg-sky-500 text-slate-950 font-bold rounded-xl text-xs hover:opacity-95 disabled:opacity-50"
+                      disabled={pwdOtpCode.trim().length < 6 || pwdOtpVerifyLoading}
+                      className="flex-1 py-2 bg-sky-500 text-slate-950 font-bold text-xs rounded-xl hover:opacity-95 disabled:opacity-50"
                     >
-                      Verify Code & Continue →
+                      {pwdOtpVerifyLoading ? 'Verifying...' : 'Verify Code & Continue →'}
                     </button>
                   </div>
                 </form>
