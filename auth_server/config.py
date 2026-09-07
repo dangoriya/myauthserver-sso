@@ -47,11 +47,12 @@ class Settings(BaseSettings):
 
     # Email Service Settings (SMTP or Brevo API)
     EMAIL_PROVIDER: str = "smtp"  # "smtp" or "brevo_api"
-    SMTP_HOST: str = "smtp.brevo.com"
+    SMTP_HOST: str = "smtp-relay.brevo.com"
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_USE_TLS: bool = True
+    SMTP_USE_SSL: bool = False  # Implicit TLS (port 465)
 
     BREVO_API_KEY: str = ""
     EMAIL_FROM: str = "no-reply@myauth.local"
