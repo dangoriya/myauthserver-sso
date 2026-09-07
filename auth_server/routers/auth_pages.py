@@ -728,3 +728,24 @@ async def reset_password_post(
         google_enabled=_get_google_enabled(db), google_href=_google_href(),
         signin_href=_signin_href(),
     )
+
+
+# ---------------------------------------------------------------------------
+# Public marketing / legal pages
+#   GET  /          — home (used as Google OAuth "Application home page")
+#   GET  /privacy   — privacy policy (Google OAuth "Privacy policy link")
+#   GET  /terms     — terms of service (Google OAuth "Terms of service link")
+# ---------------------------------------------------------------------------
+@router.get("/")
+async def home_get(request: Request, response: Response, db: Session = Depends(get_db)):
+    return render_template(request, "public/home.html", active="home")
+
+
+@router.get("/privacy")
+async def privacy_get(request: Request, response: Response, db: Session = Depends(get_db)):
+    return render_template(request, "public/privacy.html", active="privacy")
+
+
+@router.get("/terms")
+async def terms_get(request: Request, response: Response, db: Session = Depends(get_db)):
+    return render_template(request, "public/terms.html", active="terms")

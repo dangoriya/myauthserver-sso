@@ -168,6 +168,37 @@ export default function DashboardLayout({ children }) {
 
         {/* Bottom user info + logout */}
         <div className="pt-5 border-t border-slate-800/80 mt-auto space-y-3">
+          {/* Public pages (Home / Privacy / Terms) — link to the auth_server */}
+          <div className="px-1 space-y-1">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Public pages</p>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+              <a
+                href={`${process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.dilipdangoriya.com.np'}/`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-400 hover:text-emerald-400 transition"
+              >
+                Home
+              </a>
+              <a
+                href={`${process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.dilipdangoriya.com.np'}/privacy`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-400 hover:text-emerald-400 transition"
+              >
+                Privacy
+              </a>
+              <a
+                href={`${process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.dilipdangoriya.com.np'}/terms`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-400 hover:text-emerald-400 transition"
+              >
+                Terms
+              </a>
+            </div>
+          </div>
+
           {/* User display */}
           <div className="px-1 space-y-1">
             <p className="text-xs text-slate-400 truncate">{currentUser?.email || 'User'}</p>
