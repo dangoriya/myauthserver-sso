@@ -86,13 +86,13 @@ export default function ClientAppsPage() {
                   <span className="text-indigo-400 break-all select-all">{c.client_secret}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block font-sans text-[11px] uppercase tracking-wider mb-1.5">Redirect URIs</span>
-                  <div className="space-y-1.5">
+                  <span className="text-slate-500 block font-sans text-[11px] uppercase tracking-wider mb-1">Redirect URIs</span>
+                  <div className="space-y-1">
                     {c.redirect_uris ? (
                       c.redirect_uris.split(',').filter(Boolean).map((uri, idx) => (
                         <div
                           key={idx}
-                          className="text-purple-300 bg-purple-950/40 border border-purple-500/20 px-2.5 py-1.5 rounded-lg break-all text-[11px] leading-relaxed select-all"
+                          className="text-purple-400 break-all select-all leading-relaxed"
                         >
                           {uri.trim()}
                         </div>
