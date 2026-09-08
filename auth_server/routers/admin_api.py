@@ -1012,18 +1012,11 @@ def update_client(client_id: str, data: ClientUpdateSchema, db: Session = Depend
     if not client:
         raise HTTPException(status_code=404, detail="Client application not found")
     
-    if data.client_name is not None:
-        client.client_name = data.client_name
-    if data.redirect_uris is not None:
-        client.redirect_uris = data.redirect_uris
-    if data.is_sso_enabled is not None:
-        client.is_sso_enabled = data.is_sso_enabled
-    if data.post_logout_redirect_uris is not None:
-        client.post_logout_redirect_uris = data.post_logout_redirect_uris
-    if data.backchannel_logout_uris is not None:
-        client.backchannel_logout_uris = data.backchannel_logout_uris
-    if data.backchannel_logout_enabled is not None:
-        client.backchannel_logout_enabled = data.backchannel_logout_enabled
+    # Use exclude_unset so that fields explicitly set to null (e.g. the
+    # frontend sends "post_logout_redirect_uris": null to clear the value)
+    # are applied, while fields omitted from the request are left untouched.
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(client, field, value)
     
     db.commit()
     db.refresh(client)
