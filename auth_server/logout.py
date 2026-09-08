@@ -208,6 +208,21 @@ def notify_clients_backchannel(user_id: str, current_client_id: Optional[str] = 
 # ---------------------------------------------------------------------------
 # Front-channel RP-initiated logout helpers
 # ---------------------------------------------------------------------------
+def has_registered_post_logout_uris(client: ClientApp) -> bool:
+    """Return True if the client has at least one post_logout_redirect_uri registered."""
+    return bool((client.post_logout_redirect_uris or "").strip())
+
+
+def resolve_global_post_logout_url() -> str:
+    """Resolve the global fallback post-logout redirect URL.
+
+    Priority: POST_LOGOUT_REDIRECT_URL → LOGOUT_REDIRECT_URL → AUTH_SERVER_URL
+    """
+    return (settings.POST_LOGOUT_REDIRECT_URL
+            or settings.LOGOUT_REDIRECT_URL
+            or settings.AUTH_SERVER_URL)
+
+
 def is_valid_post_logout_uri(client: ClientApp, post_logout_redirect_uri: str) -> bool:
     """Return True if post_logout_redirect_uri is registered for this client.
 

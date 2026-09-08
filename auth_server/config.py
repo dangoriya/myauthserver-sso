@@ -36,12 +36,20 @@ class Settings(BaseSettings):
             self.CENTRAL_DASHBOARD_URL = self.MANAGEMENT_URL
         if not self.LOGOUT_REDIRECT_URL:
             self.LOGOUT_REDIRECT_URL = self.MANAGEMENT_URL
+        if not self.POST_LOGOUT_REDIRECT_URL:
+            self.POST_LOGOUT_REDIRECT_URL = self.LOGOUT_REDIRECT_URL
         return self
     
     AUTH_SERVER_URL: str = "http://localhost:8000"
     MANAGEMENT_URL: str = "http://localhost:3005"
     CENTRAL_DASHBOARD_URL: str = ""
     LOGOUT_REDIRECT_URL: str = ""
+
+    # Global post-logout redirect URL. When a client has no
+    # post_logout_redirect_uris registered (blank/None), the RP-initiated
+    # logout endpoint redirects the browser here instead of erroring.
+    # Falls back to LOGOUT_REDIRECT_URL when not configured.
+    POST_LOGOUT_REDIRECT_URL: str = ""
 
     BACKCHANNEL_LOGOUT_ENABLED: bool = False
 

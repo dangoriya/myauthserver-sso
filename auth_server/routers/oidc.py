@@ -54,6 +54,8 @@ from logout import (
     notify_clients_backchannel,
     perform_centralized_logout,
     register_user_session,
+    has_registered_post_logout_uris,
+    resolve_global_post_logout_url,
 )
 from security import (
     audit,
@@ -813,13 +815,22 @@ def logout(
         if originating_client_id:
             client = db.query(ClientApp).filter(ClientApp.client_id == originating_client_id).first()
         if client and is_valid_post_logout_uri(client, post_logout_redirect_uri):
+            # The provided URI matches a registered post_logout_redirect_uri
+            # for this client → safe to use.
             target = post_logout_redirect_uri
+        elif client and not has_registered_post_logout_uris(client):
+            # The client has NO registered post_logout_redirect_uris. Per the
+            # global configuration, fall back to the POST_LOGOUT_REDIRECT_URL
+            # (a trusted, operator-configured URL) instead of rejecting the
+            # request — this lets newly-registered clients log out cleanly
+            # without having to explicitly configure post_logout_redirect_uris.
+            target = resolve_global_post_logout_url()
         else:
-            # Spec: invalid post_logout_redirect_uri → must NOT redirect
-            # (otherwise we open the door to open redirects). Stay on the
-            # auth server and show an error.
+            # The client HAS registered post_logout_redirect_uris but the
+            # provided URI doesn't match any of them. Reject to prevent
+            # open-redirect attacks.
             audit("logout_invalid_redirect", request, extra={"client_id": originating_client_id,
-                                                            "uri": post_logout_redirect_uri})
+                                                             "uri": post_logout_redirect_uri})
             return render_template(
                 request, "errors/error.html", status_code=400,
                 title="Invalid logout redirect",
@@ -828,7 +839,7 @@ def logout(
             )
 
     if not target:
-        target = settings.LOGOUT_REDIRECT_URL or settings.AUTH_SERVER_URL
+        target = resolve_global_post_logout_url()
 
     # Perform centralized logout (sso_session + back-channel)
     summary = perform_centralized_logout(

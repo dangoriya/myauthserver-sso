@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from database import get_db
 from models import User, Role, ClientApp, GoogleSetting
+from config import settings
 from auth_utils import (
     decode_token, create_admin_token, verify_password, get_password_hash,
     generate_totp_secret, get_totp_uri, generate_qr_code_data_uri, verify_totp_code
@@ -166,6 +167,17 @@ class ClientCreateSchema(BaseModel):
     client_name: str
     redirect_uris: str
     is_sso_enabled: bool = True
+    post_logout_redirect_uris: Optional[str] = None
+    backchannel_logout_uris: Optional[str] = None
+    backchannel_logout_enabled: bool = False
+
+class ClientUpdateSchema(BaseModel):
+    client_name: Optional[str] = None
+    redirect_uris: Optional[str] = None
+    is_sso_enabled: Optional[bool] = None
+    post_logout_redirect_uris: Optional[str] = None
+    backchannel_logout_uris: Optional[str] = None
+    backchannel_logout_enabled: Optional[bool] = None
 
 class GoogleSettingSchema(BaseModel):
     client_id: str
@@ -967,6 +979,13 @@ def list_clients(db: Session = Depends(get_db), admin=Depends(verify_admin)):
     clients = db.query(ClientApp).all()
     return clients
 
+@router.get("/admin/clients/{client_id}")
+def get_client(client_id: str, db: Session = Depends(get_db), admin=Depends(verify_admin)):
+    client = db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client application not found")
+    return client
+
 @router.post("/admin/clients")
 def create_client(data: ClientCreateSchema, db: Session = Depends(get_db), admin=Depends(verify_admin)):
     client_id = f"client_{uuid.uuid4().hex[:12]}"
@@ -977,9 +996,35 @@ def create_client(data: ClientCreateSchema, db: Session = Depends(get_db), admin
         client_secret=client_secret,
         client_name=data.client_name,
         redirect_uris=data.redirect_uris,
-        is_sso_enabled=data.is_sso_enabled
+        is_sso_enabled=data.is_sso_enabled,
+        post_logout_redirect_uris=data.post_logout_redirect_uris,
+        backchannel_logout_uris=data.backchannel_logout_uris,
+        backchannel_logout_enabled=data.backchannel_logout_enabled
     )
     db.add(client)
+    db.commit()
+    db.refresh(client)
+    return client
+
+@router.put("/admin/clients/{client_id}")
+def update_client(client_id: str, data: ClientUpdateSchema, db: Session = Depends(get_db), admin=Depends(verify_admin)):
+    client = db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client application not found")
+    
+    if data.client_name is not None:
+        client.client_name = data.client_name
+    if data.redirect_uris is not None:
+        client.redirect_uris = data.redirect_uris
+    if data.is_sso_enabled is not None:
+        client.is_sso_enabled = data.is_sso_enabled
+    if data.post_logout_redirect_uris is not None:
+        client.post_logout_redirect_uris = data.post_logout_redirect_uris
+    if data.backchannel_logout_uris is not None:
+        client.backchannel_logout_uris = data.backchannel_logout_uris
+    if data.backchannel_logout_enabled is not None:
+        client.backchannel_logout_enabled = data.backchannel_logout_enabled
+    
     db.commit()
     db.refresh(client)
     return client
@@ -992,6 +1037,17 @@ def delete_client(client_id: str, db: Session = Depends(get_db), admin=Depends(v
     db.delete(client)
     db.commit()
     return {"message": "Client deleted"}
+
+# ---------------------------------------------------------------------------
+# Global server settings (read-only) — consumed by the management UI to
+# conditionally enable / disable per-client logout options.
+# ---------------------------------------------------------------------------
+@router.get("/admin/global-settings")
+def get_global_settings(admin=Depends(verify_admin)):
+    return {
+        "backchannel_logout_enabled": settings.BACKCHANNEL_LOGOUT_ENABLED,
+        "post_logout_redirect_url": settings.POST_LOGOUT_REDIRECT_URL or settings.LOGOUT_REDIRECT_URL or "",
+    }
 
 # Google Setting & Global 2FA Management
 @router.get("/admin/google-settings")
