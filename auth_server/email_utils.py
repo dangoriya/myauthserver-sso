@@ -112,7 +112,7 @@ class EmailService:
         subject = f"{code} is your IAM Auth Email Verification Code"
         body_html = f"""
         <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; background-color: #0f172a; border-radius: 16px; color: #f8fafc;">
-            {EmailService._header("IAM Auth Server", "#10b981", "Identity & Access Control System", settings.MANAGEMENT_URL)}
+            {EmailService._header("IAM Auth Server", "#10b981", "Identity & Access Management System", settings.MANAGEMENT_URL)}
             <div style="background-color: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155;">
                 <p style="margin-top: 0; color: #cbd5e1;">Hi {name or 'User'},</p>
                 <p style="color: #94a3b8;">Use the verification code below to complete your registration:</p>

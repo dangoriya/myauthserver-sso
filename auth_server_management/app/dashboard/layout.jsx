@@ -92,14 +92,14 @@ export default function DashboardLayout({ children }) {
     process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.dilipdangoriya.com.np';
 
   const navItems = isAdmin ? [
-    { label: 'Overview',        href: '/dashboard',                 Icon: LayoutDashboard },
-    { label: 'User Management', href: '/dashboard/users',           Icon: Users },
-    { label: 'Roles Management',href: '/dashboard/roles',           Icon: ShieldCheck },
-    { label: 'Registered Apps', href: '/dashboard/clients',         Icon: AppWindow },
+    { label: 'Overview', href: '/dashboard', Icon: LayoutDashboard },
+    { label: 'User Management', href: '/dashboard/users', Icon: Users },
+    { label: 'Roles Management', href: '/dashboard/roles', Icon: ShieldCheck },
+    { label: 'Registered Apps', href: '/dashboard/clients', Icon: AppWindow },
     { label: 'Google OAuth & 2FA', href: '/dashboard/google-settings', Icon: Settings },
-    { label: 'My Profile',      href: '/dashboard/profile',         Icon: UserCircle },
+    { label: 'My Profile', href: '/dashboard/profile', Icon: UserCircle },
   ] : [
-    { label: 'My Profile',      href: '/dashboard/profile',         Icon: UserCircle },
+    { label: 'My Profile', href: '/dashboard/profile', Icon: UserCircle },
   ];
 
   return (
@@ -107,9 +107,9 @@ export default function DashboardLayout({ children }) {
       {/* Mobile Top Header */}
       <header className="md:hidden flex items-center justify-between p-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-30">
         <div className="flex items-center gap-3">
-            <img src="/logo.svg" alt="" width="36" height="36" className="rounded-xl shadow-md" />
-            <h2 className="font-bold text-sm bg-gradient-to-r from-emerald-400 to-indigo-300 bg-clip-text text-transparent">IAM Portal</h2>
-          </div>
+          <img src="/logo.svg" alt="" width="36" height="36" className="rounded-xl shadow-md" />
+          <h2 className="font-bold text-sm bg-gradient-to-r from-emerald-400 to-indigo-300 bg-clip-text text-transparent">IAM Portal</h2>
+        </div>
         <button
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
           className="p-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-white"
@@ -139,7 +139,7 @@ export default function DashboardLayout({ children }) {
             <img src="/logo.svg" alt="" width="40" height="40" className="rounded-xl shadow-md" />
             <div>
               <h2 className="font-bold bg-gradient-to-r from-emerald-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">IAM System</h2>
-              <p className="text-xs text-slate-400">Identity & Access Control</p>
+              <p className="text-xs text-slate-400">Identity & Access Management</p>
             </div>
           </div>
 
@@ -152,11 +152,10 @@ export default function DashboardLayout({ children }) {
                   key={href}
                   href={href}
                   onClick={() => setIsSidebarOpen(false)}
-                  className={`flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium text-sm transition ${
-                    active
-                      ? 'bg-gradient-to-r from-emerald-500/20 via-indigo-500/10 to-purple-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
-                      : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
-                  }`}
+                  className={`flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium text-sm transition ${active
+                    ? 'bg-gradient-to-r from-emerald-500/20 via-indigo-500/10 to-purple-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                    : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+                    }`}
                 >
                   <Icon size={16} strokeWidth={1.8} className={active ? 'text-emerald-400' : 'text-slate-500'} />
                   {label}
