@@ -818,12 +818,12 @@ def logout(
             # The provided URI matches a registered post_logout_redirect_uri
             # for this client → safe to use.
             target = post_logout_redirect_uri
-        elif client and not has_registered_post_logout_uris(client):
-            # The client has NO registered post_logout_redirect_uris. Per the
-            # global configuration, fall back to the POST_LOGOUT_REDIRECT_URL
-            # (a trusted, operator-configured URL) instead of rejecting the
-            # request — this lets newly-registered clients log out cleanly
-            # without having to explicitly configure post_logout_redirect_uris.
+        elif not client or not has_registered_post_logout_uris(client):
+            # The client could not be identified (no client_id / id_token_hint
+            # / sso_session) OR the client has no registered
+            # post_logout_redirect_uris. In both cases we fall back to the
+            # global POST_LOGOUT_REDIRECT_URL — a trusted, operator-configured
+            # URL — instead of rejecting the request or showing an error.
             target = resolve_global_post_logout_url()
         else:
             # The client HAS registered post_logout_redirect_uris but the
