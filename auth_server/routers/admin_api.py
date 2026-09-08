@@ -51,7 +51,7 @@ def sso_ping(payload=Depends(verify_token)):
     return {
         "ok": True,
         "user_id": payload.get("sub"),
-        "role": payload.get("role"),
+        "roles": payload.get("roles", []),
     }
 
 
@@ -79,7 +79,7 @@ def sso_logout(request: Request, data: SSOLogoutSchema, payload=Depends(verify_t
     from logout import perform_centralized_logout
 
     target = data.user_id or payload.get("sub")
-    is_admin = payload.get("role") == "admin" or payload.get("is_admin")
+    is_admin = "admin" in payload.get("roles", [])
     if data.user_id and data.user_id != payload.get("sub") and not is_admin:
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
@@ -105,7 +105,7 @@ def sso_logout(request: Request, data: SSOLogoutSchema, payload=Depends(verify_t
 
 
 def verify_admin(payload=Depends(verify_token)):
-    if payload.get("role") != "admin" and not payload.get("is_admin"):
+    if "admin" not in payload.get("roles", []):
         raise HTTPException(status_code=403, detail="Admin privileges required")
     return payload
 
@@ -138,16 +138,14 @@ class UserCreateSchema(BaseModel):
     email: str
     name: Optional[str] = None
     password: str
-    role: str = "normal-user"
-    is_admin: bool = False
+    roles: str = "normal-user"
     is_2fa_enabled: bool = False
 
 class UserUpdateSchema(BaseModel):
     name: Optional[str] = None
     picture: Optional[str] = None
-    role: Optional[str] = None
+    roles: Optional[str] = None
     is_active: Optional[bool] = None
-    is_admin: Optional[bool] = None
     is_2fa_enabled: Optional[bool] = None
     password: Optional[str] = None
     reset_2fa: Optional[bool] = False
@@ -246,7 +244,7 @@ def iam_login(data: LoginSchema, db: Session = Depends(get_db)):
                 "message": "2FA code required"
             }
     
-    token = create_admin_token(user.id, user.email, role=user.role or ("admin" if user.is_admin else "normal-user"))
+    token = create_admin_token(user.id, user.email, role=user.role)
     return {
         "access_token": token,
         "token_type": "Bearer",
@@ -254,7 +252,7 @@ def iam_login(data: LoginSchema, db: Session = Depends(get_db)):
             "id": user.id,
             "email": user.email,
             "name": user.name,
-            "role": user.role,
+            "roles": user.roles_list,
             "is_admin": user.is_admin,
             "is_2fa_enabled": user.is_2fa_enabled,
             "provider": user.provider
@@ -275,7 +273,7 @@ def iam_login_2fa_verify(data: IAMLogin2FAVerifySchema, db: Session = Depends(ge
     if not verify_totp_code(user.totp_secret, data.totp_code):
         raise HTTPException(status_code=400, detail="Invalid 2FA verification code")
 
-    token = create_admin_token(user.id, user.email, role=user.role or ("admin" if user.is_admin else "normal-user"))
+    token = create_admin_token(user.id, user.email, role=user.role)
     return {
         "access_token": token,
         "token_type": "Bearer",
@@ -283,7 +281,7 @@ def iam_login_2fa_verify(data: IAMLogin2FAVerifySchema, db: Session = Depends(ge
             "id": user.id,
             "email": user.email,
             "name": user.name,
-            "role": user.role,
+            "roles": user.roles_list,
             "is_admin": user.is_admin,
             "is_2fa_enabled": user.is_2fa_enabled,
             "provider": user.provider
@@ -445,9 +443,8 @@ def signup_complete(data: SignupCompleteSchema, db: Session = Depends(get_db)):
         email=email_clean,
         name=data.name,
         hashed_password=get_password_hash(data.password),
-        role="normal-user",  # Default role
+        roles="normal-user",
         role_id=role_obj.id if role_obj else None,
-        is_admin=False,
         is_active=True,
         provider="local",
         is_2fa_enabled=False,
@@ -470,7 +467,7 @@ def signup_complete(data: SignupCompleteSchema, db: Session = Depends(get_db)):
             "id": user.id,
             "email": user.email,
             "name": user.name,
-            "role": user.role,
+            "roles": user.roles_list,
             "is_admin": user.is_admin,
             "is_2fa_enabled": False
         },
@@ -513,6 +510,7 @@ def get_profile(db: Session = Depends(get_db), current_user=Depends(verify_token
         "email": user.email,
         "name": user.name,
         "picture": user.picture,
+        "roles": user.roles_list,
         "role": user.role,
         "role_label": role_obj.label if role_obj else user.role,
         "is_admin": user.is_admin,
@@ -797,11 +795,11 @@ def list_roles(db: Session = Depends(get_db), admin=Depends(verify_admin)):
     result = []
     for r in roles:
         active_count = db.query(User).filter(
-            or_(User.role == r.name, User.role_id == r.id),
+            or_(User.roles.contains(r.name), User.role_id == r.id),
             User.is_active == True
         ).count()
         total_count = db.query(User).filter(
-            or_(User.role == r.name, User.role_id == r.id)
+            or_(User.roles.contains(r.name), User.role_id == r.id)
         ).count()
         result.append({
             "id": r.id,
@@ -855,7 +853,7 @@ def delete_role(role_id: int, db: Session = Depends(get_db), admin=Depends(verif
     
     # Disable all users assigned to this role when deleting
     associated_users = db.query(User).filter(
-        or_(User.role == role.name, User.role_id == role.id)
+        or_(User.roles.contains(role.name), User.role_id == role.id)
     ).all()
     disabled_count = len(associated_users)
     for u in associated_users:
@@ -885,7 +883,7 @@ def list_users(
             )
         )
     if role:
-        query = query.filter(User.role == role)
+        query = query.filter(User.roles.contains(role))
     if is_active is not None:
         query = query.filter(User.is_active == is_active)
 
@@ -898,6 +896,7 @@ def list_users(
             "picture": u.picture,
             "role": u.role,
             "role_id": u.role_id,
+            "roles": u.roles_list,
             "is_admin": u.is_admin,
             "is_active": u.is_active,
             "provider": u.provider,
@@ -913,16 +912,15 @@ def create_user(data: UserCreateSchema, db: Session = Depends(get_db), admin=Dep
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(status_code=400, detail="User already exists")
     
-    role_obj = db.query(Role).filter(Role.name == data.role).first()
+    role_obj = db.query(Role).filter(Role.name == data.roles.split(",")[0]).first()
     role_id = role_obj.id if role_obj else None
 
     user = User(
         email=data.email,
         name=data.name,
         hashed_password=get_password_hash(data.password),
-        role=data.role,
+        roles=data.roles,
         role_id=role_id,
-        is_admin=data.is_admin or (data.role == "admin"),
         is_active=True,
         is_2fa_enabled=data.is_2fa_enabled,
         provider="local"
@@ -938,20 +936,16 @@ def update_user(user_id: str, data: UserUpdateSchema, db: Session = Depends(get_
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
+    if data.roles is not None:
+        user.roles = data.roles
+        role_obj = db.query(Role).filter(Role.name == data.roles.split(",")[0]).first()
+        user.role_id = role_obj.id if role_obj else None
     if data.name is not None:
         user.name = data.name
     if data.picture is not None:
         user.picture = data.picture
-    if data.role is not None:
-        user.role = data.role
-        role_obj = db.query(Role).filter(Role.name == data.role).first()
-        user.role_id = role_obj.id if role_obj else None
-        if data.role == "admin":
-            user.is_admin = True
     if data.is_active is not None:
         user.is_active = data.is_active
-    if data.is_admin is not None:
-        user.is_admin = data.is_admin
     if data.is_2fa_enabled is not None:
         user.is_2fa_enabled = data.is_2fa_enabled
     if data.reset_2fa:

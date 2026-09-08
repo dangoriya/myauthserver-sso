@@ -43,9 +43,9 @@ def run_migrations(reset: bool = False):
         if guest_role:
             # Reassign any guest users to normal-user
             normal_role = role_map.get("normal-user")
-            guest_users = db.query(User).filter(User.role == "guest").all()
+            guest_users = db.query(User).filter(User.roles.contains("guest")).all()
             for u in guest_users:
-                u.role = "normal-user"
+                u.roles = "normal-user"
                 if normal_role:
                     u.role_id = normal_role.id
             db.delete(guest_role)
@@ -59,9 +59,8 @@ def run_migrations(reset: bool = False):
                 email="admin@example.com",
                 name="System Administrator",
                 hashed_password=get_password_hash("admin123"),
-                role="admin",
+                roles="admin",
                 role_id=admin_role.id if admin_role else None,
-                is_admin=True,
                 is_active=True,
                 provider="local"
             )

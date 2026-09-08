@@ -161,8 +161,8 @@ def openid_configuration():
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256", "plain"],
         "token_endpoint_auth_methods_supported": ["client_secret_post"],
-        "claims_supported": ["sub", "iss", "aud", "exp", "iat", "auth_time", "email",
-                             "name", "picture", "role", "roles", "is_admin", "sid"],
+         "claims_supported": ["sub", "iss", "aud", "exp", "iat", "auth_time", "email",
+                              "name", "picture", "roles", "is_admin", "sid"],
         "backchannel_logout_supported": settings.BACKCHANNEL_LOGOUT_ENABLED,
         "backchannel_logout_session_supported": settings.BACKCHANNEL_LOGOUT_ENABLED,
     }
@@ -594,8 +594,8 @@ async def google_auth_callback(
         normal_role = db.query(Role).filter(Role.name == "normal-user").first()
         user = User(
             email=google_email, name=google_name, picture=google_picture,
-            role="normal-user", role_id=normal_role.id if normal_role else None,
-            is_admin=False, is_active=True, provider="google",
+            roles="normal-user", role_id=normal_role.id if normal_role else None,
+            is_active=True, provider="google",
         )
         db.add(user); db.commit(); db.refresh(user)
         audit("signup_via_google", request, user_id=user.id, email=user.email)
@@ -654,11 +654,10 @@ def token_endpoint(
         user = db.query(User).filter(User.id == payload["user_id"]).first()
         if not user or not user.is_active:
             raise HTTPException(status_code=400, detail="user not active")
-        user_role = user.role or ("admin" if user.is_admin else "normal-user")
         sid = payload.get("sid")
         scope = payload.get("scope", "openid profile email")
         access_token = create_access_token(user.id, client_id, scope=scope,
-                                           role=user_role, is_admin=user.is_admin, sid=sid)
+                                           roles=user.roles_list, sid=sid)
         new_refresh = issue_refresh_token(user.id, client_id, sid, scope=scope)
         return {
             "access_token": access_token,
@@ -708,11 +707,10 @@ def token_endpoint(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    user_role = user.role or ("admin" if user.is_admin else "normal-user")
     sid = code_data.get("sid")
     id_token = create_id_token(user.id, user.email, user.name, client_id, user.picture,
-                               role=user_role, is_admin=user.is_admin, sid=sid)
-    access_token = create_access_token(user.id, client_id, role=user_role, is_admin=user.is_admin, sid=sid)
+                               roles=user.roles_list, sid=sid)
+    access_token = create_access_token(user.id, client_id, roles=user.roles_list, sid=sid)
     refresh = issue_refresh_token(user.id, client_id, sid)
 
     return {
@@ -744,15 +742,13 @@ def userinfo_endpoint(request: Request, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    user_role = user.role or ("admin" if user.is_admin else "normal-user")
     return {
         "sub": user.id,
         "email": user.email,
         "name": user.name or user.email,
         "picture": user.picture or "",
         "provider": user.provider,
-        "role": user_role,
-        "roles": [user_role],
+        "roles": user.roles_list,
         "is_admin": user.is_admin,
         "is_2fa_enabled": user.is_2fa_enabled,
     }
@@ -763,6 +759,11 @@ def userinfo_endpoint(request: Request, db: Session = Depends(get_db)):
 #   https://openid.net/specs/openid-connect-rpinitiated-1_0.html
 #
 # Query parameters:
+#   id_token_hint            — required; identifies client (aud) and user (sub)
+#   post_logout_redirect_uri — optional, must be registered for the client
+#   state                    — optional, echoed back
+#
+# Query parameters:
 #   id_token_hint         — required (or end_session_endpoint may use sub lookup)
 #   post_logout_redirect_uri — optional, must be registered for the client
 #   state                 — optional, echoed back
@@ -770,12 +771,12 @@ def userinfo_endpoint(request: Request, db: Session = Depends(get_db)):
 #
 # Flow:
 #   1. The user clicks "Sign Out" on any client app
-#   2. Client app redirects the browser to /logout?id_token_hint=...&client_id=...
+#   2. Client app redirects the browser to /logout?id_token_hint=...
 #   3. Auth server verifies the id_token, then terminates the central SSO
 #      session and dispatches OIDC Back-Channel Logout 1.0 to every other
 #      client app the user had a session with.
 #   4. Auth server redirects the browser back to the client's
-#      post_logout_redirect_uri (or the AUTH_SERVER_URL root).
+#      post_logout_redirect_uri (or the global POST_LOGOUT_REDIRECT_URL).
 # ===========================================================================
 @router.get("/logout")
 def logout(
@@ -783,50 +784,56 @@ def logout(
     id_token_hint: Optional[str] = None,
     post_logout_redirect_uri: Optional[str] = None,
     state: Optional[str] = None,
-    client_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    # Resolve the user + originating client from the id_token_hint (preferred)
-    # or from the sso_session cookie. We DO NOT require the id_token to be
-    # unexpired — clients may want to log out users with stale tokens.
+    # --- Resolve the client (from id_token_hint) and the user -------------
+    #
+    # Standard OIDC RP-Initiated Logout: id_token_hint is REQUIRED.
+    # Its `aud` claim gives the client_id; its `sub` claim gives the user_id.
+    # Expiration is NOT verified (a stale token must still identify the client).
     user_id = None
-    originating_client_id = client_id
+    originating_client_id = None
+
     if id_token_hint:
         from auth_utils import decode_token
-        payload = decode_token(id_token_hint)
+        payload = decode_token(id_token_hint, verify_exp=False)
         if payload:
             user_id = payload.get("sub")
-            if not originating_client_id:
-                originating_client_id = payload.get("aud")
+            originating_client_id = payload.get("aud")
+    else:
+        # No id_token_hint — try SSO session cookie for user_id
+        sso_session_id = request.cookies.get("sso_session")
+        if sso_session_id:
+            sess = get_cache(f"sso_session:{sso_session_id}")
+            if sess:
+                user_id = sess.get("user_id")
 
-    # Fall back to sso_session cookie
-    sso_session_id = request.cookies.get("sso_session")
-    if not user_id and sso_session_id:
-        sess = get_cache(f"sso_session:{sso_session_id}")
-        if sess:
-            user_id = sess.get("user_id")
-            if not originating_client_id:
-                originating_client_id = sess.get("client_id")
+    if not originating_client_id:
+        # Cannot identify the client without a valid id_token_hint
+        audit("logout_no_client", request)
+        return render_template(
+            request, "errors/error.html", status_code=400,
+            title="Logout request missing id_token_hint",
+            message="The id_token_hint parameter is required for this end session endpoint.",
+        )
 
-    # Validate post_logout_redirect_uri against the client configuration
+    client = db.query(ClientApp).filter(ClientApp.client_id == originating_client_id).first()
+
+    # --- Validate post_logout_redirect_uri against the client configuration
+    #
+    #   1. URI matches a registered post_logout_redirect_uri  →  use it
+    #   2. Client has no registered post_logout URIs →  global fallback
+    #   3. Client has registered URIs but provided URI doesn't match →  reject
     target = None
     if post_logout_redirect_uri:
-        client = None
-        if originating_client_id:
-            client = db.query(ClientApp).filter(ClientApp.client_id == originating_client_id).first()
         if client and is_valid_post_logout_uri(client, post_logout_redirect_uri):
-            # The provided URI matches a registered post_logout_redirect_uri
-            # for this client → safe to use.
             target = post_logout_redirect_uri
-        elif not client or not has_registered_post_logout_uris(client):
-            # The client could not be identified (no client_id / id_token_hint
-            # / sso_session) OR the client has no registered
-            # post_logout_redirect_uris. In both cases we fall back to the
-            # global POST_LOGOUT_REDIRECT_URL — a trusted, operator-configured
-            # URL — instead of rejecting the request or showing an error.
+        elif not has_registered_post_logout_uris(client):
+            # Client has no registered post_logout_redirect_uris —
+            # fall back to the global POST_LOGOUT_REDIRECT_URL.
             target = resolve_global_post_logout_url()
         else:
-            # The client HAS registered post_logout_redirect_uris but the
+            # Client HAS registered post_logout_redirect_uris but the
             # provided URI doesn't match any of them. Reject to prevent
             # open-redirect attacks.
             audit("logout_invalid_redirect", request, extra={"client_id": originating_client_id,
@@ -835,7 +842,7 @@ def logout(
                 request, "errors/error.html", status_code=400,
                 title="Invalid logout redirect",
                 message=f"The post_logout_redirect_uri <code>{post_logout_redirect_uri}</code> "
-                        f"is not registered for client <code>{originating_client_id or '?'}</code>.",
+                        f"is not registered for client <code>{originating_client_id}</code>.",
             )
 
     if not target:

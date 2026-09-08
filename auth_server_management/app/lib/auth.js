@@ -10,11 +10,11 @@
 /**
  * Persist user session tokens via HttpOnly cookies using the Next.js API route.
  */
-export async function setSession({ access_token, refresh_token, expires_in }) {
+export async function setSession({ access_token, refresh_token, id_token, expires_in }) {
   const res = await fetch('/api/auth/session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ access_token, refresh_token, expires_in }),
+    body: JSON.stringify({ access_token, refresh_token, id_token, expires_in }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
@@ -118,13 +118,20 @@ export async function centralLogout({ redirectTo } = {}) {
     // Ignore error
   }
 
-  await clearSession();
+  // Clear localStorage (but NOT cookies — the /api/auth/logout route needs
+  // the mgmt_id_token cookie to pass as id_token_hint to the auth server)
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem('mgmt_user');
+    } catch {}
+  }
 
   if (typeof window !== 'undefined') {
     if (redirectTo) {
       window.location.href = redirectTo;
     } else {
       // Use the dynamic server-side logout route that reads runtime AUTH_SERVER_URL
+      // It reads mgmt_id_token cookie and passes it as id_token_hint
       window.location.href = '/api/auth/logout';
     }
   }

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,9 +8,13 @@ export const dynamic = 'force-dynamic';
  *
  * Dynamic Server-Side Logout Route.
  *
- * Resolves the runtime AUTH_SERVER_URL and MANAGEMENT_URL directly from the server's
- * environment variables (configured via .env or Dokploy), clears all session cookies,
- * and redirects the browser to the central SSO logout endpoint on the auth server.
+ * Reads the mgmt_id_token HttpOnly cookie (set during login) and sends it as
+ * the `id_token_hint` to the central auth server's /logout endpoint — the
+ * standard OIDC RP-Initiated Logout identification method. The server decodes
+ * the token's `aud` claim to identify the client and its `sub` claim to
+ * identify the user.
+ *
+ * Also clears all session cookies on the response.
  */
 export async function GET() {
   const authServerUrl = (
@@ -25,13 +30,20 @@ export async function GET() {
   ).replace(/\/+$/, '');
 
   const postLogoutUri = `${managementUrl}/logged-out`;
-  const targetUrl = `${authServerUrl}/logout?client_id=auth_management_app&post_logout_redirect_uri=${encodeURIComponent(postLogoutUri)}`;
+  const cookieStore = await cookies();
+  const idToken = cookieStore.get('mgmt_id_token')?.value;
+
+  let targetUrl = `${authServerUrl}/logout?post_logout_redirect_uri=${encodeURIComponent(postLogoutUri)}`;
+  if (idToken) {
+    targetUrl += `&id_token_hint=${encodeURIComponent(idToken)}`;
+  }
 
   const response = NextResponse.redirect(targetUrl);
 
   // Clear all session cookies on the server response
   response.cookies.set('mgmt_access_token', '', { maxAge: 0, path: '/' });
   response.cookies.set('mgmt_refresh_token', '', { maxAge: 0, path: '/' });
+  response.cookies.set('mgmt_id_token', '', { maxAge: 0, path: '/' });
   response.cookies.set('mgmt_user', '', { maxAge: 0, path: '/' });
 
   return response;

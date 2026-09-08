@@ -188,8 +188,7 @@ export default function UserManagementPage() {
           name, 
           picture,
           password, 
-          role: userRole, 
-          is_admin: userRole === 'admin',
+          roles: userRole, 
           is_2fa_enabled: is2FAEnabled 
         })
       });
@@ -234,8 +233,7 @@ export default function UserManagementPage() {
         body: JSON.stringify({
           name: editName,
           picture: editPicture,
-          role: editRole,
-          is_admin: editRole === 'admin',
+          roles: editRole,
           is_2fa_enabled: edit2FA,
           is_active: editActive
         })

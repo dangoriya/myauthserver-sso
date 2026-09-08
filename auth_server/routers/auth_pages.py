@@ -437,9 +437,8 @@ async def signup_step3(
         email=email,
         name=name,
         hashed_password=get_password_hash(password),
-        role="normal-user",
+        roles="normal-user",
         role_id=normal_role.id if normal_role else None,
-        is_admin=False,
         is_active=True,
         provider="local",
     )
@@ -537,7 +536,7 @@ def _finalize_signup(
     sso_session_id = str(uuid.uuid4())
     set_cache(
         f"sso_session:{sso_session_id}",
-        {"user_id": user.id, "email": user.email, "name": user.name, "role": user.role},
+        {"user_id": user.id, "email": user.email, "name": user.name, "role": user.role, "roles": user.roles_list},
         ttl=86400,
     )
     set_sso_cookie(response, sso_session_id, max_age=86400)

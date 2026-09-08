@@ -9,7 +9,7 @@ import { NextResponse } from 'next/server';
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { access_token, refresh_token, expires_in } = body;
+    const { access_token, refresh_token, id_token, expires_in } = body;
 
     const response = NextResponse.json({ success: true });
     const maxAge = expires_in || 86400 * 7;
@@ -39,6 +39,16 @@ export async function POST(request) {
       });
     }
 
+    if (id_token) {
+      response.cookies.set('mgmt_id_token', id_token, {
+        httpOnly: true,
+        secure: isSecure,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 86400 * 7,
+      });
+    }
+
     return response;
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
@@ -53,6 +63,7 @@ export async function DELETE() {
   const response = NextResponse.json({ success: true });
   response.cookies.set('mgmt_access_token', '', { maxAge: 0, path: '/' });
   response.cookies.set('mgmt_refresh_token', '', { maxAge: 0, path: '/' });
+  response.cookies.set('mgmt_id_token', '', { maxAge: 0, path: '/' });
   // Also clear legacy mgmt_user cookie in case it exists from older sessions
   response.cookies.set('mgmt_user', '', { maxAge: 0, path: '/' });
   return response;

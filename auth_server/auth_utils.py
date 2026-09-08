@@ -62,8 +62,9 @@ def verify_totp_code(secret: str, code: str) -> bool:
     totp = pyotp.TOTP(secret)
     return totp.verify(code.strip())
 
-def create_id_token(user_id: str, email: str, name: str, client_id: str, picture: str = None, role: str = "normal-user", is_admin: bool = False, sid: str = None) -> str:
+def create_id_token(user_id: str, email: str, name: str, client_id: str, picture: str = None, roles: list = None, sid: str = None) -> str:
     now = int(time.time())
+    role_list = roles or ["normal-user"]
     payload = {
         "iss": settings.AUTH_SERVER_URL,
         "sub": user_id,
@@ -74,26 +75,24 @@ def create_id_token(user_id: str, email: str, name: str, client_id: str, picture
         "email": email,
         "name": name or email,
         "picture": picture or "",
-        "role": role,
-        "roles": [role],
-        "is_admin": is_admin
+        "roles": role_list,
     }
     if sid:
         payload["sid"] = sid
     return jwt.encode(payload, _private_pem, algorithm="RS256", headers={"kid": get_kid()})
 
-def create_access_token(user_id: str, client_id: str, scope: str = "openid profile email", role: str = "normal-user", is_admin: bool = False, sid: str = None) -> str:
+def create_access_token(user_id: str, client_id: str, scope: str = "openid profile email", roles: list = None, sid: str = None) -> str:
     now = int(time.time())
+    role_list = roles or ["normal-user"]
     payload = {
         "iss": settings.AUTH_SERVER_URL,
         "sub": user_id,
+        "aud": client_id,
         "client_id": client_id,
         "scope": scope,
-        "role": role,
-        "roles": [role],
-        "is_admin": is_admin,
+        "roles": role_list,
         "exp": now + ACCESS_TOKEN_TTL,
-        "iat": now
+        "iat": now,
     }
     if sid:
         payload["sid"] = sid
@@ -105,18 +104,25 @@ def create_admin_token(user_id: str, email: str, role: str = "admin") -> str:
         "iss": settings.AUTH_SERVER_URL,
         "sub": user_id,
         "email": email,
-        "role": role,
+        "roles": [role] if role else ["admin"],
         "exp": now + (3600 * 24), # 24 hours
-        "iat": now
+        "iat": now,
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
 
-def decode_token(token: str):
-    """Decode a RS256-signed access/id token. Returns None on any failure."""
+def decode_token(token: str, verify_exp: bool = True):
+    """Decode a RS256-signed access/id token. Returns None on any failure.
+
+    When verify_exp=False, expiration is not checked — useful for logout
+    where a stale id_token_hint must still identify the client.
+    """
     if not token:
         return None
     try:
-        return jwt.decode(token, _public_pem, algorithms=["RS256"])
+        return jwt.decode(
+            token, _public_pem, algorithms=["RS256"],
+            options={"verify_exp": verify_exp},
+        )
     except JWTError:
         return None
 

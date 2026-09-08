@@ -79,14 +79,16 @@ export default function AuthCallbackPage() {
           console.error('Failed to parse JWT payload', e);
         }
 
-        const isAdmin = !!userPayload.is_admin;
-        const userRole = userPayload.role || (isAdmin ? 'admin' : 'normal-user');
+        const roles = userPayload.roles || [];
+        const isAdmin = roles.includes('admin');
+        const userRole = roles.length > 0 ? roles[0] : 'normal-user';
         const userObj = {
           id: userPayload.sub,
           email: userPayload.email,
           name: userPayload.name,
           picture: userPayload.picture,
           role: userRole,
+          roles: roles,
           is_admin: isAdmin,
           provider: 'local',
         };
@@ -95,6 +97,7 @@ export default function AuthCallbackPage() {
         await setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
+          id_token: idToken,
           expires_in: expiresIn,
         });
 

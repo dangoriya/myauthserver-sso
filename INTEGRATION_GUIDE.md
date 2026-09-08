@@ -37,16 +37,19 @@ The auth server runs at `http://localhost:8000`.
 
 ## 1. Register Your Client App
 
-**Endpoint:** `POST /api/v1/clients` (requires admin Bearer token or SSO session cookie)
+**Endpoint:** `POST /api/v1/admin/clients` (requires admin Bearer token)
 
 ```bash
-curl -X POST http://localhost:8000/api/v1/clients \
+curl -X POST http://localhost:8000/api/v1/admin/clients \
   -H "Authorization: Bearer <admin-access-token>" \
   -H "Content-Type: application/json" \
   -d '{
     "client_name": "My Client App",
     "redirect_uris": "http://localhost:3001/callback",
-    "is_sso_enabled": true
+    "is_sso_enabled": true,
+    "post_logout_redirect_uris": "http://localhost:3001/logged-out",
+    "backchannel_logout_uris": "",
+    "backchannel_logout_enabled": false
   }'
 ```
 
@@ -59,21 +62,23 @@ curl -X POST http://localhost:8000/api/v1/clients \
   "client_secret": "secret_x7y8z9...",
   "client_name": "My Client App",
   "redirect_uris": "http://localhost:3001/callback",
-  "is_sso_enabled": true,
+  "post_logout_redirect_uris": "http://localhost:3001/logged-out",
+  "backchannel_logout_uris": "",
   "backchannel_logout_enabled": false,
+  "is_sso_enabled": true,
   "created_at": "2024-..."
 }
 ```
 
-New clients are created with `backchannel_logout_enabled=false` by default. Enable it later if you register a back-channel logout endpoint (see [Back-Channel Logout](#back-channel-logout)).
+New clients are created with `backchannel_logout_enabled=false` and `post_logout_redirect_uris` left blank (falls back to the global `POST_LOGOUT_REDIRECT_URL`). Enable back-channel logout later if you register a back-channel logout endpoint (see [Back-Channel Logout](#back-channel-logout)).
 
 ### List / Delete Clients
 
 ```bash
-curl http://localhost:8000/api/v1/clients \
+curl http://localhost:8000/api/v1/admin/clients \
   -H "Authorization: Bearer <admin-access-token>"
 
-curl -X DELETE http://localhost:8000/api/v1/clients/client_a1b2c3d4e5f6 \
+curl -X DELETE http://localhost:8000/api/v1/admin/clients/client_a1b2c3d4e5f6 \
   -H "Authorization: Bearer <admin-access-token>"
 ```
 
@@ -162,10 +167,7 @@ curl http://localhost:8000/userinfo \
   "name": "User Name",
   "picture": "https://...",
   "provider": "local",
-  "role": "normal-user",
-  "roles": ["normal-user"],
-  "is_admin": false,
-  "is_2fa_enabled": false
+  "roles": ["normal-user"]
 }
 ```
 
@@ -217,9 +219,7 @@ JWT claims in access tokens:
   "exp": 1234567890,
   "iat": 1234567890,
   "scope": "openid profile email",
-  "role": "normal-user",
-  "roles": ["normal-user"],
-  "is_admin": false
+  "roles": ["normal-user"]
 }
 ```
 
@@ -235,9 +235,7 @@ JWT claims in id tokens:
   "email": "user@example.com",
   "name": "User Name",
   "picture": "https://...",
-  "role": "normal-user",
   "roles": ["normal-user"],
-  "is_admin": false,
   "sid": "oidc_session_id"
 }
 ```
@@ -262,13 +260,27 @@ GET http://localhost:8000/logout?
   state=OPTIONAL_STATE
 ```
 
-The auth server will:
-1. Verify the id_token (may be expired — this is allowed)
-2. Terminate the central SSO session
-3. Revoke all refresh tokens for the user (forces re-auth on all clients)
-4. Redirect the browser to the registered `post_logout_redirect_uri`
+**`id_token_hint` is required.** It identifies both the user (via the `sub` claim) and the client (via the `aud` claim). Token expiration is **not** checked — a stale id_token can still be used for logout identification.
 
-The `post_logout_redirect_uri` must be registered during client creation by appending it to `post_logout_redirect_uris`. If not provided, the user is redirected to `MANAGEMENT_URL` (default `http://localhost:3005`).
+The `client_id` query parameter is **not accepted** on this endpoint. Client identification is handled exclusively through `id_token_hint`.
+
+**Validation rules:**
+
+1. The `post_logout_redirect_uri` (if provided) is validated against the client's registered `post_logout_redirect_uris`.
+2. If it matches a registered URI → the browser is redirected there.
+3. If the client has **no** registered `post_logout_redirect_uris` → the browser is redirected to the global `POST_LOGOUT_REDIRECT_URL` (configured via `.env` / `docker-compose.yml`, e.g. `https://dilipdangoriya.com.np`).
+4. If the client **has** registered `post_logout_redirect_uris` but the provided URI does **not** match → the request is rejected with HTTP 400 (open-redirect protection).
+5. If `post_logout_redirect_uri` is **not** provided → the browser is redirected to the global `POST_LOGOUT_REDIRECT_URL`.
+
+The auth server will:
+1. Verify the id_token signature (expiration not required)
+2. Identify the client from the `aud` claim
+3. Validate `post_logout_redirect_uri` against the client's registered URIs
+4. Terminate the central SSO session
+5. Revoke all refresh tokens for the user (forces re-auth on all clients)
+6. Redirect the browser to the validated `post_logout_redirect_uri` or the global fallback
+
+Register `post_logout_redirect_uris` during client creation (or via the management UI / `PUT /api/v1/admin/clients/{client_id}`). The fallback chain is: `POST_LOGOUT_REDIRECT_URL` → `LOGOUT_REDIRECT_URL` → `MANAGEMENT_URL`.
 
 ### API Logout (Server-Initiated)
 
@@ -282,6 +294,8 @@ curl -X POST http://localhost:8000/api/v1/sso/logout \
 ```
 
 The caller must be the target user or an admin. This endpoint revokes all refresh tokens and terminates the SSO session. Back-channel logout is dispatched only if `BACKCHANNEL_LOGOUT_ENABLED=true` and the client has `backchannel_logout_enabled=true`.
+
+> **Note:** The `/api/v1/sso/logout` endpoint handles server-side revocation. For the browser-based OIDC RP-Initiated Logout (`/logout`), the client must send `id_token_hint` — see above.
 
 ### Token Revocation (RFC 7009)
 
@@ -319,8 +333,9 @@ Auto-discovery libraries can consume this directly. Key fields:
 | Variable | Default | Description |
 |---|---|---|
 | `AUTH_SERVER_URL` | `http://localhost:8000` | Public URL of the auth server; used as JWT `iss` and for OIDC discovery. Must be browser-accessible. |
-| `MANAGEMENT_URL` | `http://localhost:3005` | Management app public URL. `CENTRAL_DASHBOARD_URL` and `LOGOUT_REDIRECT_URL` default to this value. |
+| `MANAGEMENT_URL` | `http://localhost:3005` | Management app public URL. `CENTRAL_DASHBOARD_URL`, `LOGOUT_REDIRECT_URL`, and `POST_LOGOUT_REDIRECT_URL` default to this value. |
 | `BACKCHANNEL_LOGOUT_ENABLED` | `false` | Global toggle for OIDC Back-Channel Logout 1.0. When `false`, the server never POSTs logout tokens to clients. |
+| `POST_LOGOUT_REDIRECT_URL` | (none — falls back to `LOGOUT_REDIRECT_URL`) | Global fallback URL used during RP-Initiated Logout when the client has no registered `post_logout_redirect_uris` or no `post_logout_redirect_uri` is provided. Example: `https://dilipdangoriya.com.np` |
 | `REDIS_HOST` | `redis` | Redis service name (Docker network) |
 | `REDIS_PORT` | `6379` | Redis port |
 | `DATABASE_URL` | (see docker-compose) | PostgreSQL connection string |
@@ -352,15 +367,23 @@ The auth server supports OIDC Back-Channel Logout 1.0 for server-to-server sessi
 
 To enable:
 
-1. Set `BACKCHANNEL_LOGOUT_ENABLED=true` in `docker-compose.yml`
+1. Set `BACKCHANNEL_LOGOUT_ENABLED=true` in `docker-compose.yml` (global toggle)
 2. Provide a back-channel logout endpoint in your client app:
    ```
    POST /backchannel-logout
    Content-Type: application/x-www-form-urlencoded
    Body: logout_token=<signed JWT>
    ```
-3. Register the endpoint URI in the client's `backchannel_logout_uris` column in the database
-4. Set `backchannel_logout_enabled=true` for the client
+3. Register the endpoint URI and enable back-channel logout for the client — either via the management UI (`Registered Apps → Edit → Back-Channel Logout`) or via the API:
+   ```bash
+   curl -X PUT http://localhost:8000/api/v1/admin/clients/client_a1b2c3d4e5f6 \
+     -H "Authorization: Bearer <admin-access-token>" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "backchannel_logout_uris": "http://localhost:3001/backchannel-logout",
+       "backchannel_logout_enabled": true
+     }'
+   ```
 
 The OP will POST a `logout_token` JWT (with `events` claim containing `http://schemas.openid.net/event/backchannel-logout`) to each registered URI when a user's SSO session is terminated. Verify the token signature via the JWKS endpoint.
 
@@ -376,7 +399,7 @@ http://localhost:8000
 http://localhost:3005
 
 # Client registration (admin)
-POST http://localhost:8000/api/v1/clients
+POST http://localhost:8000/api/v1/admin/clients
 
 # OIDC endpoints
 http://localhost:8000/.well-known/openid-configuration
@@ -389,6 +412,6 @@ http://localhost:8000/oauth/session/active
 
 # Management API
 POST http://localhost:8000/api/v1/auth/login
-GET  http://localhost:8000/api/v1/clients
+GET  http://localhost:8000/api/v1/admin/clients
 POST http://localhost:8000/api/v1/sso/logout
 ```
