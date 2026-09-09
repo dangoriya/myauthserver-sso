@@ -1,0 +1,118 @@
+services:
+  postgresdb:
+    image: pgvector/pgvector:pg15
+    container_name: postgresdb
+    restart: always
+    env_file: .env.local
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin123}
+      POSTGRES_DB: ${POSTGRES_DB:-auth_db}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    restart: always
+    env_file: .env.local
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin123}
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    depends_on:
+      postgresdb:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: always
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  auth_server:
+    build:
+      context: ./auth_server
+    container_name: auth_server
+    restart: always
+    env_file: .env.local
+    ports:
+      - "8005:8000"
+    environment:
+      # Database — password sourced from .env for security
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-admin123}@postgresdb:${POSTGRES_PORT:-5432}/auth_db
+      # Redis — host/port sourced from .env so external Redis can be configured in production
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      # App & redirect URLs
+      - AUTH_SERVER_URL=http://localhost:8005
+      - MANAGEMENT_URL=http://localhost:3005
+      # Security & JWT Secret Key
+      - SECRET_KEY=${SECRET_KEY:-changeme_production_secret_key_12345}
+      # Startup & OIDC Settings (set RESET_DB=false in production)
+      - RESET_DB=${RESET_DB:-true}
+      - BACKCHANNEL_LOGOUT_ENABLED=${BACKCHANNEL_LOGOUT_ENABLED:-false}
+      # Global post-logout redirect URL (fallback when a client has no post_logout_redirect_uris)
+      - POST_LOGOUT_REDIRECT_URL=${POST_LOGOUT_REDIRECT_URL:-http://localhost:8005}
+      # Email Provider (SMTP or Brevo API)
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-smtp}
+      - SMTP_HOST=${SMTP_HOST:-smtp-relay.brevo.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_USE_TLS=${SMTP_USE_TLS:-true}
+      - SMTP_USE_SSL=${SMTP_USE_SSL:-false}
+      - BREVO_API_KEY=${BREVO_API_KEY:-}
+      - EMAIL_FROM=${EMAIL_FROM:-admin@example.com}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-IAM}
+    volumes:
+      - auth_server_keys:/app/keys
+    depends_on:
+      postgresdb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  auth_server_management:
+    build:
+      context: ./auth_server_management
+    container_name: auth_server_management
+    restart: always
+    env_file: .env.local
+    ports:
+      - "3005:3000"
+    environment:
+      # Browser-facing URLs (public domains matching auth_server)
+      - AUTH_SERVER_URL=http://localhost:8005
+      - MANAGEMENT_URL=http://localhost:3005
+      - NEXT_PUBLIC_AUTH_SERVER_URL=${AUTH_SERVER_URL:-http://localhost:8005}
+      - NEXT_PUBLIC_MANAGEMENT_URL=${MANAGEMENT_URL:-http://localhost:3005}
+      # Server-side Internal URL (Docker network communication to auth_server)
+      - AUTH_SERVER_INTERNAL_URL=http://auth_server:8000
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+    depends_on:
+      - auth_server
+
+volumes:
+  postgres_data:
+  redis_data:
+  auth_server_keys:
+
