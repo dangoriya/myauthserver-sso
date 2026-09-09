@@ -46,8 +46,6 @@ services:
       # Browser-facing URLs (public domains matching auth_server)
       - AUTH_SERVER_URL=${AUTH_SERVER_URL:-https://auth.example.com}
       - MANAGEMENT_URL=${MANAGEMENT_URL:-https://iam.example.com}
-      - NEXT_PUBLIC_AUTH_SERVER_URL=${AUTH_SERVER_URL:-https://auth.example.com}
-      - NEXT_PUBLIC_MANAGEMENT_URL=${MANAGEMENT_URL:-https://iam.example.com}
       # Server-side Internal URL (Docker network communication to auth_server)
       - AUTH_SERVER_INTERNAL_URL=http://auth_server:8000
       - HOSTNAME=0.0.0.0

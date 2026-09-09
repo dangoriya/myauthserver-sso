@@ -102,8 +102,6 @@ services:
       # Browser-facing URLs (public domains matching auth_server)
       - AUTH_SERVER_URL=http://localhost:8005
       - MANAGEMENT_URL=http://localhost:3005
-      - NEXT_PUBLIC_AUTH_SERVER_URL=${AUTH_SERVER_URL:-http://localhost:8005}
-      - NEXT_PUBLIC_MANAGEMENT_URL=${MANAGEMENT_URL:-http://localhost:3005}
       # Server-side Internal URL (Docker network communication to auth_server)
       - AUTH_SERVER_INTERNAL_URL=http://auth_server:8000
       - HOSTNAME=0.0.0.0
