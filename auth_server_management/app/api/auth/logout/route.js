@@ -37,6 +37,8 @@ export async function GET() {
   if (idToken) {
     targetUrl += `&id_token_hint=${encodeURIComponent(idToken)}`;
   }
+  // Also pass client_id for cases where id_token_hint is missing or invalid
+  targetUrl += `&client_id=auth_management_app`;
 
   const response = NextResponse.redirect(targetUrl);
 

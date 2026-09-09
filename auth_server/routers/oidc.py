@@ -657,7 +657,8 @@ def token_endpoint(
         sid = payload.get("sid")
         scope = payload.get("scope", "openid profile email")
         access_token = create_access_token(user.id, client_id, scope=scope,
-                                           roles=user.roles_list, sid=sid)
+                                           roles=user.roles_list, sid=sid,
+                                           email=user.email, name=user.name, picture=user.picture)
         new_refresh = issue_refresh_token(user.id, client_id, sid, scope=scope)
         return {
             "access_token": access_token,
@@ -710,7 +711,8 @@ def token_endpoint(
     sid = code_data.get("sid")
     id_token = create_id_token(user.id, user.email, user.name, client_id, user.picture,
                                roles=user.roles_list, sid=sid)
-    access_token = create_access_token(user.id, client_id, roles=user.roles_list, sid=sid)
+    access_token = create_access_token(user.id, client_id, roles=user.roles_list, sid=sid,
+                                       email=user.email, name=user.name, picture=user.picture)
     refresh = issue_refresh_token(user.id, client_id, sid)
 
     return {
@@ -759,12 +761,12 @@ def userinfo_endpoint(request: Request, db: Session = Depends(get_db)):
 #   https://openid.net/specs/openid-connect-rpinitiated-1_0.html
 #
 # Query parameters:
-#   id_token_hint            — required; identifies client (aud) and user (sub)
+#   id_token_hint            — optional; identifies client (aud) and user (sub)
 #   post_logout_redirect_uri — optional, must be registered for the client
 #   state                    — optional, echoed back
 #
 # Query parameters:
-#   id_token_hint         — required (or end_session_endpoint may use sub lookup)
+#   id_token_hint         — optional (or end_session_endpoint may use sub lookup)
 #   post_logout_redirect_uri — optional, must be registered for the client
 #   state                 — optional, echoed back
 #   client_id             — required when post_logout_redirect_uri is used
@@ -784,15 +786,18 @@ def logout(
     id_token_hint: Optional[str] = None,
     post_logout_redirect_uri: Optional[str] = None,
     state: Optional[str] = None,
+    client_id: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     # --- Resolve the client (from id_token_hint) and the user -------------
     #
-    # Standard OIDC RP-Initiated Logout: id_token_hint is REQUIRED.
+    # Standard OIDC RP-Initiated Logout: id_token_hint is OPTIONAL.
     # Its `aud` claim gives the client_id; its `sub` claim gives the user_id.
     # Expiration is NOT verified (a stale token must still identify the client).
+    # If not provided, we try to infer from SSO session cookie.
     user_id = None
     originating_client_id = None
+    sso_session_id = request.cookies.get("sso_session")
 
     if id_token_hint:
         from auth_utils import decode_token
@@ -802,48 +807,36 @@ def logout(
             originating_client_id = payload.get("aud")
     else:
         # No id_token_hint — try SSO session cookie for user_id
-        sso_session_id = request.cookies.get("sso_session")
         if sso_session_id:
             sess = get_cache(f"sso_session:{sso_session_id}")
             if sess:
                 user_id = sess.get("user_id")
 
-    if not originating_client_id:
-        # Cannot identify the client without a valid id_token_hint
-        audit("logout_no_client", request)
-        return render_template(
-            request, "errors/error.html", status_code=400,
-            title="Logout request missing id_token_hint",
-            message="The id_token_hint parameter is required for this end session endpoint.",
-        )
+    # If client_id is explicitly provided (e.g. by the client app), use it
+    # as the originating client. This allows logout without id_token_hint.
+    if client_id:
+        originating_client_id = client_id
 
-    client = db.query(ClientApp).filter(ClientApp.client_id == originating_client_id).first()
+    # If we still don't have a client_id but have a user_id, we can still
+    # perform logout for that user (centralized logout), but we won't be
+    # able to validate post_logout_redirect_uri against a specific client.
+    client = None
+    if originating_client_id:
+        client = db.query(ClientApp).filter(ClientApp.client_id == originating_client_id).first()
 
     # --- Validate post_logout_redirect_uri against the client configuration
     #
     #   1. URI matches a registered post_logout_redirect_uri  →  use it
     #   2. Client has no registered post_logout URIs →  global fallback
-    #   3. Client has registered URIs but provided URI doesn't match →  reject
+    #   3. Client has registered URIs but provided URI doesn't match →  global fallback (not error)
     target = None
     if post_logout_redirect_uri:
         if client and is_valid_post_logout_uri(client, post_logout_redirect_uri):
             target = post_logout_redirect_uri
-        elif not has_registered_post_logout_uris(client):
-            # Client has no registered post_logout_redirect_uris —
-            # fall back to the global POST_LOGOUT_REDIRECT_URL.
-            target = resolve_global_post_logout_url()
         else:
-            # Client HAS registered post_logout_redirect_uris but the
-            # provided URI doesn't match any of them. Reject to prevent
-            # open-redirect attacks.
-            audit("logout_invalid_redirect", request, extra={"client_id": originating_client_id,
-                                                             "uri": post_logout_redirect_uri})
-            return render_template(
-                request, "errors/error.html", status_code=400,
-                title="Invalid logout redirect",
-                message=f"The post_logout_redirect_uri <code>{post_logout_redirect_uri}</code> "
-                        f"is not registered for client <code>{originating_client_id}</code>.",
-            )
+            # Client not found, or URI doesn't match, or client has no registered URIs
+            # Fall back to global POST_LOGOUT_REDIRECT_URL instead of returning error
+            target = resolve_global_post_logout_url()
 
     if not target:
         target = resolve_global_post_logout_url()

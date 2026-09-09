@@ -81,7 +81,7 @@ def create_id_token(user_id: str, email: str, name: str, client_id: str, picture
         payload["sid"] = sid
     return jwt.encode(payload, _private_pem, algorithm="RS256", headers={"kid": get_kid()})
 
-def create_access_token(user_id: str, client_id: str, scope: str = "openid profile email", roles: list = None, sid: str = None) -> str:
+def create_access_token(user_id: str, client_id: str, scope: str = "openid profile email", roles: list = None, sid: str = None, email: str = None, name: str = None, picture: str = None) -> str:
     now = int(time.time())
     role_list = roles or ["normal-user"]
     payload = {
@@ -94,6 +94,12 @@ def create_access_token(user_id: str, client_id: str, scope: str = "openid profi
         "exp": now + ACCESS_TOKEN_TTL,
         "iat": now,
     }
+    if email:
+        payload["email"] = email
+    if name:
+        payload["name"] = name
+    if picture:
+        payload["picture"] = picture
     if sid:
         payload["sid"] = sid
     return jwt.encode(payload, _private_pem, algorithm="RS256", headers={"kid": get_kid()})
@@ -115,13 +121,14 @@ def decode_token(token: str, verify_exp: bool = True):
 
     When verify_exp=False, expiration is not checked — useful for logout
     where a stale id_token_hint must still identify the client.
+    Audience verification is disabled to allow decoding tokens from any client.
     """
     if not token:
         return None
     try:
         return jwt.decode(
             token, _public_pem, algorithms=["RS256"],
-            options={"verify_exp": verify_exp},
+            options={"verify_exp": verify_exp, "verify_aud": False},
         )
     except JWTError:
         return None
