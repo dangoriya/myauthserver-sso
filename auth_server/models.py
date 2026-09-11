@@ -25,12 +25,28 @@ class User(Base):
     name = Column(String, nullable=True)
     picture = Column(String, nullable=True)
     hashed_password = Column(String, nullable=True) # Null for OAuth-only users
-    role = Column(String, default="normal-user", nullable=False)
+    roles = Column(Text, default="normal-user", nullable=False)  # comma-separated
     role_id = Column(Integer, ForeignKey("roles.id"), nullable=True)
-    is_admin = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
+
+    @property
+    def roles_list(self) -> list:
+        """Return roles as a list (split on commas)."""
+        return [r.strip() for r in (self.roles or "").split(",") if r.strip()] or ["normal-user"]
+
+    @property
+    def role(self) -> str:
+        """Backward-compat: the primary (first) role."""
+        return self.roles_list[0]
+
+    @property
+    def is_admin(self) -> bool:
+        """True when 'admin' is among the user's roles."""
+        return "admin" in self.roles_list
+
     provider = Column(String, default="local") # "local" or "google"
     is_2fa_enabled = Column(Boolean, default=False)
+    is_2fa_activated = Column(Boolean, default=False)
     totp_secret = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

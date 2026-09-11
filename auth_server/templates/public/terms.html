@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{# Public terms of service for auth.dilipdangoriya.com.np
+Used for Google Auth Platform "Terms of service" verification. #}
+
+{% block title %}Terms of Service — IAM Auth Server{% endblock %}
+
+{% block content %}
+{% set effective = "2026-09-07" %}
+{% set last_updated = effective %}
+
+{% include "public/_navbar.html" %}
+
+<main class="public-main public-doc">
+  <header class="public-doc-head">
+    <p class="public-eyebrow">Legal</p>
+    <h1>Terms of Service</h1>
+    <p class="public-sub">
+      <strong>Service:</strong> IAM Auth Server (auth.dilipdangoriya.com.np)<br />
+      <strong>Operator:</strong> Dilip Dangoriya, Nepal<br />
+      <strong>Contact:</strong> <a href="mailto:dilipdangoriya@gmail.com">dilipdangoriya@gmail.com</a><br />
+      <strong>Effective date:</strong> {{ effective }}
+    </p>
+  </header>
+
+  <nav class="public-toc" aria-label="Table of contents">
+    <strong>On this page</strong>
+    <a href="#acceptance">1. Acceptance</a>
+    <a href="#service">2. The service</a>
+    <a href="#eligibility">3. Eligibility &amp; accounts</a>
+    <a href="#acceptable">4. Acceptable use</a>
+    <a href="#security">5. Security &amp; 2FA</a>
+    <a href="#privacy">6. Privacy</a>
+    <a href="#availability">7. Availability</a>
+    <a href="#changes">8. Changes</a>
+    <a href="#liability">9. Limitation of liability</a>
+    <a href="#termination">10. Termination</a>
+    <a href="#law">11. Governing law</a>
+    <a href="#contact">12. Contact</a>
+  </nav>
+
+  <section id="acceptance">
+    <h2>1. Acceptance of these terms</h2>
+    <p>By creating an account on, or signing in to, the IAM Auth Server
+      (the <em>Service</em>), you agree to be bound by these Terms of Service and our
+      <a href="/privacy">Privacy Policy</a>. If you do not agree, do not use the Service.
+    </p>
+  </section>
+
+  <section id="service">
+    <h2>2. The service</h2>
+    <p>The Service provides centralised single sign-on authentication for a set of
+      internal applications operated by Dilip Dangoriya on the
+      <code>dilipdangoriya.com.np</code> family of domains (for example:
+      <code>calender.dilipdangoriya.com.np</code>, <code>live.dilipdangoriya.com.np</code>,
+      <code>meroshare.dilipdangoriya.com.np</code>, <code>play.dilipdangoriya.com.np</code>).
+      The Service issues short-lived, signed OIDC identity tokens to those applications
+      so that you can move between them without re-entering your credentials.
+    </p>
+    <p>The Service is provided free of charge for personal use within the
+      <code>dilipdangoriya.com.np</code> ecosystem. It is not offered as a commercial
+      service to third parties.
+    </p>
+  </section>
+
+  <section id="eligibility">
+    <h2>3. Eligibility &amp; accounts</h2>
+    <ul>
+      <li>You must be at least <strong>18 years old</strong> to create an account.</li>
+      <li>You must provide a valid email address that you control.</li>
+      <li>You are responsible for keeping your account credentials (password and
+        authenticator app) secure.</li>
+      <li>You must provide accurate information and keep it up to date.</li>
+      <li>You may not create an account on behalf of someone else, or impersonate
+        any person or entity.</li>
+    </ul>
+  </section>
+
+  <section id="acceptable">
+    <h2>4. Acceptable use</h2>
+    <p>You agree not to:</p>
+    <ul>
+      <li>Use the Service for any unlawful purpose or in violation of any
+        applicable laws.</li>
+      <li>Attempt to gain unauthorised access to the Service, other users'
+        accounts, or any systems or networks connected to the Service.</li>
+      <li>Probe, scan, or test the vulnerability of the Service, or breach any
+        security or authentication measures.</li>
+      <li>Reverse-engineer, decompile, or otherwise attempt to extract the source
+        code of the Service.</li>
+      <li>Use the Service to send unsolicited communications, spam, or malware.</li>
+      <li>Interfere with or disrupt the integrity or performance of the Service
+        or the data contained therein.</li>
+    </ul>
+  </section>
+
+  <section id="security">
+    <h2>5. Security &amp; two-factor authentication</h2>
+    <p>You are responsible for safeguarding your password and any second-factor
+      device (such as your phone's authenticator app).</p>
+    <ul>
+      <li>Use a unique, strong password (at least 8 characters, with letters and
+        numbers) and change it immediately if you suspect it has been compromised.</li>
+      <li>Where available, enable two-factor authentication (TOTP) on your account.</li>
+      <li>Never share your password, one-time codes, or authenticator codes with
+        anyone — including people claiming to be support staff.</li>
+    </ul>
+    <p>If you lose access to your authenticator, use the in-app
+      <em>Reset 2FA</em> flow (email-confirmed) or contact
+      <a href="mailto:dilipdangoriya@gmail.com">dilipdangoriya@gmail.com</a>.
+    </p>
+  </section>
+
+  <section id="privacy">
+    <h2>6. Privacy</h2>
+    <p>Your use of the Service is also governed by our
+      <a href="/privacy">Privacy Policy</a>, which explains what data we collect,
+      how we use it, and the choices you have.
+    </p>
+  </section>
+
+  <section id="availability">
+    <h2>7. Availability</h2>
+    <p>The Service is provided on a best-effort basis. We may modify, suspend, or
+      interrupt any part of the Service at any time, with or without notice, to
+      perform maintenance, fix issues, or comply with legal obligations. We do not
+      guarantee uninterrupted availability.</p>
+  </section>
+
+  <section id="changes">
+    <h2>8. Changes to these terms</h2>
+    <p>We may update these Terms of Service from time to time. The <em>effective date</em>
+      at the top of this page reflects when this version took effect.
+      Continued use of the Service after changes take effect constitutes acceptance
+      of the updated terms.</p>
+  </section>
+
+  <section id="liability">
+    <h2>9. Limitation of liability</h2>
+    <p>The Service is provided <em>as is</em> and <em>as available</em>, without
+      warranties of any kind, either express or implied, including but not limited
+      to warranties of merchantability, fitness for a particular purpose, or
+      non-infringement.</p>
+    <p>To the maximum extent permitted by applicable law, the Operator shall not
+      be liable for any indirect, incidental, special, consequential, or punitive
+      damages, or any loss of data, profits, or business, arising out of or in
+      connection with your use of the Service.</p>
+  </section>
+
+  <section id="termination">
+    <h2>10. Termination</h2>
+    <p>You may stop using the Service and request deletion of your account at any
+      time by contacting <a href="mailto:dilipdangoriya@gmail.com">dilipdangoriya@gmail.com</a>.</p>
+    <p>We may suspend or terminate your access if you breach these terms, or if
+      continued operation of the Service requires it.</p>
+  </section>
+
+  <section id="law">
+    <h2>11. Governing law</h2>
+    <p>These terms are governed by the laws of Nepal. Any dispute arising from or
+      related to the Service will be resolved in the courts of Nepal, unless
+      applicable consumer protection law provides otherwise.</p>
+  </section>
+
+  <section id="contact">
+    <h2>12. Contact</h2>
+    <p>If you have any questions about these terms, please contact:</p>
+    <p>
+      Dilip Dangoriya<br />
+      Email: <a href="mailto:dilipdangoriya@gmail.com">dilipdangoriya@gmail.com</a><br />
+      Service URL: <a href="https://auth.dilipdangoriya.com.np/">auth.dilipdangoriya.com.np</a>
+    </p>
+  </section>
+</main>
+
+{% include "public/_footer.html" %}
+{% endblock %}

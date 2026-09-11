@@ -136,6 +136,9 @@
   document.addEventListener('DOMContentLoaded', function () {
     initOtpBoxes('otp-boxes-verify', 'totp_code_verify', 'otp-hint-verify', 'btn-verify');
     initOtpBoxes('otp-boxes-setup', 'totp_code_setup', 'otp-hint-setup', 'btn-verify');
+    initOtpBoxes('otp-boxes-mail', 'code_mail', 'otp-hint-mail', 'btn-verify-mail');
+    initOtpBoxes('otp-boxes-step4', 'totp_code_step4', 'otp-hint-step4', 'btn-activate-2fa');
+    initOtpBoxes('otp-boxes-mail', 'code_mail', 'otp-hint-mail', 'btn-verify-mail');
   });
 
   // ---- Copy secret key (2FA) ----

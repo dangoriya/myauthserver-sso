@@ -18,6 +18,7 @@ export default function ProfilePage() {
   const [pwdStep, setPwdStep] = useState(1);
   const [oldPassword, setOldPassword] = useState('');
   const [pwdOtpCode, setPwdOtpCode] = useState('');
+  const [pwdOtpVerifyLoading, setPwdOtpVerifyLoading] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showOldPwd, setShowOldPwd] = useState(false);
@@ -112,12 +113,12 @@ export default function ProfilePage() {
     setPwdMsg('');
     setPwdErr('');
 
-    if (setPwdNew !== setPwdConfirm) {
-      setPwdErr('Passwords do not match');
+    if (!isValidPassword(setPwdNew)) {
+      setPwdErr('Password must be at least 8 characters and include at least one letter and one number.');
       return;
     }
-    if (setPwdNew.length < 6) {
-      setPwdErr('Password must be at least 6 characters long');
+    if (setPwdNew !== setPwdConfirm) {
+      setPwdErr('Passwords do not match');
       return;
     }
 
@@ -179,7 +180,7 @@ export default function ProfilePage() {
         throw new Error(otpData.detail || 'Failed to send OTP code to email');
       }
 
-      setPwdMsg(`Current password verified! 6-digit code sent to ${profile?.email}`);
+      setPwdMsg('');
       setPwdStep(2);
     } catch (err) {
       setPwdErr(err.message);
@@ -188,8 +189,8 @@ export default function ProfilePage() {
     }
   };
 
-  // Password Reset Step 2: Validate Email OTP Code
-  const handleVerifyPwdOtpCode = (e) => {
+  // Password Reset Step 2: Server-side validation of the 6-digit OTP code
+  const handleVerifyPwdOtpCode = async (e) => {
     e.preventDefault();
     setPwdMsg('');
     setPwdErr('');
@@ -199,8 +200,28 @@ export default function ProfilePage() {
       return;
     }
 
-    setPwdMsg('Code accepted! Now set your new password.');
-    setPwdStep(3);
+    setPwdOtpVerifyLoading(true);
+    try {
+      const res = await fetchAuthed('/api/v1/user/password-reset/verify-otp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ otp_code: pwdOtpCode })
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || 'Invalid verification code');
+      }
+
+      setPwdMsg('Code accepted! Now set your new password.');
+      setPwdStep(3);
+    } catch (err) {
+      setPwdErr(err.message);
+    } finally {
+      setPwdOtpVerifyLoading(false);
+    }
   };
 
   // Password Reset Step 3: Set New Password + Confirm Password with Email OTP
@@ -209,25 +230,24 @@ export default function ProfilePage() {
     setPwdMsg('');
     setPwdErr('');
 
-    if (newPassword !== confirmPassword) {
-      setPwdErr('New password and confirmation password do not match');
+    if (!isValidPassword(newPassword)) {
+      setPwdErr('Password must be at least 8 characters and include at least one letter and one number.');
       return;
     }
-    if (newPassword.length < 6) {
-      setPwdErr('Password must be at least 6 characters long');
+    if (newPassword !== confirmPassword) {
+      setPwdErr('New password and confirmation password do not match');
       return;
     }
 
     setPwdLoading(true);
 
     try {
-      const res = await fetchAuthed('/api/v1/user/password-reset/confirm-otp', {
+      const res = await fetchAuthed('/api/v1/user/password-reset/set-new-password', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          otp_code: pwdOtpCode,
           new_password: newPassword
         })
       });
@@ -444,6 +464,11 @@ export default function ProfilePage() {
     return <div className="p-8 text-center text-slate-400">Loading user profile...</div>;
   }
 
+  // Password policy — mirrors the auth_server set-password / reset-password rule
+  // (8+ characters, at least one letter, at least one digit).
+  const isValidPassword = (pwd) =>
+    typeof pwd === 'string' && pwd.length >= 8 && /[A-Za-z]/.test(pwd) && /\d/.test(pwd);
+
   // Inline input validation styling helper with red glow
   const inputClass = (isInvalid = false) =>
     `w-full px-3.5 py-2.5 bg-slate-800 border rounded-xl text-white text-sm focus:outline-none transition-all duration-200 ${
@@ -580,11 +605,11 @@ export default function ProfilePage() {
                   <input
                     type={showSetPwdNew ? 'text' : 'password'}
                     required
-                    minLength={6}
+                    minLength={8}
                     value={setPwdNew}
                     onChange={(e) => setSetPwdNew(e.target.value)}
-                    placeholder="Minimum 6 characters"
-                    className={inputClass(setPwdNew.length > 0 && setPwdNew.length < 6)}
+                    placeholder="At least 8 characters, with a letter and a number"
+                    className={inputClass(setPwdNew.length > 0 && !isValidPassword(setPwdNew))}
                   />
                   <button type="button" onClick={() => setShowSetPwdNew(!showSetPwdNew)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
                     {showSetPwdNew ? '👁️' : '🙈'}
@@ -598,11 +623,11 @@ export default function ProfilePage() {
                   <input
                     type={showSetPwdConfirm ? 'text' : 'password'}
                     required
-                    minLength={6}
+                    minLength={8}
                     value={setPwdConfirm}
                     onChange={(e) => setSetPwdConfirm(e.target.value)}
                     placeholder="Re-enter new password"
-                    className={inputClass(setPwdConfirm.length > 0 && (setPwdConfirm !== setPwdNew || setPwdConfirm.length < 6))}
+                    className={inputClass(setPwdConfirm.length > 0 && setPwdConfirm !== setPwdNew)}
                   />
                   <button type="button" onClick={() => setShowSetPwdConfirm(!showSetPwdConfirm)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
                     {showSetPwdConfirm ? '👁️' : '🙈'}
@@ -634,7 +659,7 @@ export default function ProfilePage() {
                         type={showOldPwd ? 'text' : 'password'}
                         required
                         value={oldPassword}
-                        onChange={(e) => setOldPassword(e.target.value)}
+                        onChange={(e) => { setOldPassword(e.target.value); setPwdErr(''); }}
                         placeholder="Enter current password"
                         className={inputClass(pwdErr.length > 0)}
                       />
@@ -691,10 +716,10 @@ export default function ProfilePage() {
                     </button>
                     <button
                       type="submit"
-                      disabled={pwdOtpCode.trim().length < 6}
-                      className="flex-1 py-2.5 bg-sky-500 text-slate-950 font-bold rounded-xl text-xs hover:opacity-95 disabled:opacity-50"
+                      disabled={pwdOtpCode.trim().length < 6 || pwdOtpVerifyLoading}
+                      className="flex-1 py-2 bg-sky-500 text-slate-950 font-bold text-xs rounded-xl hover:opacity-95 disabled:opacity-50"
                     >
-                      Verify Code & Continue →
+                      {pwdOtpVerifyLoading ? 'Verifying...' : 'Verify Code & Continue →'}
                     </button>
                   </div>
                 </form>
@@ -709,11 +734,11 @@ export default function ProfilePage() {
                       <input
                         type={showNewPwd ? 'text' : 'password'}
                         required
-                        minLength={6}
+                        minLength={8}
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="Minimum 6 characters"
-                        className={inputClass(newPassword.length > 0 && newPassword.length < 6)}
+                        placeholder="At least 8 characters, with a letter and a number"
+                        className={inputClass(newPassword.length > 0 && !isValidPassword(newPassword))}
                       />
                       <button type="button" onClick={() => setShowNewPwd(!showNewPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
                         {showNewPwd ? '👁️' : '🙈'}
@@ -727,11 +752,11 @@ export default function ProfilePage() {
                       <input
                         type={showConfirmPwd ? 'text' : 'password'}
                         required
-                        minLength={6}
+                        minLength={8}
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                         placeholder="Re-enter new password"
-                        className={inputClass(confirmPassword.length > 0 && (confirmPassword !== newPassword || confirmPassword.length < 6))}
+                        className={inputClass(confirmPassword.length > 0 && confirmPassword !== newPassword)}
                       />
                       <button type="button" onClick={() => setShowConfirmPwd(!showConfirmPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
                         {showConfirmPwd ? '👁️' : '🙈'}

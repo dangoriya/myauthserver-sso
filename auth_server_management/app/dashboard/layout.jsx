@@ -87,15 +87,19 @@ export default function DashboardLayout({ children }) {
   const roleName = currentUser?.role || (isAdmin ? 'Admin' : 'User');
   const displayName = currentUser?.name || currentUser?.email || 'User';
 
+  // Public-facing auth server URL (used to build links to Home / Privacy / Terms)
+  const authServerUrl =
+    process.env.NEXT_PUBLIC_AUTH_SERVER_URL || 'https://auth.dilipdangoriya.com.np';
+
   const navItems = isAdmin ? [
-    { label: 'Overview',        href: '/dashboard',                 Icon: LayoutDashboard },
-    { label: 'User Management', href: '/dashboard/users',           Icon: Users },
-    { label: 'Roles Management',href: '/dashboard/roles',           Icon: ShieldCheck },
-    { label: 'Registered Apps', href: '/dashboard/clients',         Icon: AppWindow },
+    { label: 'Overview', href: '/dashboard', Icon: LayoutDashboard },
+    { label: 'User Management', href: '/dashboard/users', Icon: Users },
+    { label: 'Roles Management', href: '/dashboard/roles', Icon: ShieldCheck },
+    { label: 'Registered Apps', href: '/dashboard/clients', Icon: AppWindow },
     { label: 'Google OAuth & 2FA', href: '/dashboard/google-settings', Icon: Settings },
-    { label: 'My Profile',      href: '/dashboard/profile',         Icon: UserCircle },
+    { label: 'My Profile', href: '/dashboard/profile', Icon: UserCircle },
   ] : [
-    { label: 'My Profile',      href: '/dashboard/profile',         Icon: UserCircle },
+    { label: 'My Profile', href: '/dashboard/profile', Icon: UserCircle },
   ];
 
   return (
@@ -103,9 +107,7 @@ export default function DashboardLayout({ children }) {
       {/* Mobile Top Header */}
       <header className="md:hidden flex items-center justify-between p-4 bg-slate-900 border-b border-slate-800 sticky top-0 z-30">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-400 to-indigo-500 flex items-center justify-center font-bold text-white shadow-md text-xs">
-            IAM
-          </div>
+          <img src="/logo.svg" alt="" width="36" height="36" className="rounded-xl shadow-md" />
           <h2 className="font-bold text-sm bg-gradient-to-r from-emerald-400 to-indigo-300 bg-clip-text text-transparent">IAM Portal</h2>
         </div>
         <button
@@ -134,12 +136,10 @@ export default function DashboardLayout({ children }) {
         <div>
           {/* Logo */}
           <div className="hidden md:flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-400 to-indigo-500 flex items-center justify-center font-bold text-lg text-white shadow-md">
-              IAM
-            </div>
+            <img src="/logo.svg" alt="" width="40" height="40" className="rounded-xl shadow-md" />
             <div>
               <h2 className="font-bold bg-gradient-to-r from-emerald-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent">IAM System</h2>
-              <p className="text-xs text-slate-400">Identity & Access Control</p>
+              <p className="text-xs text-slate-400">Identity & Access Management</p>
             </div>
           </div>
 
@@ -152,22 +152,55 @@ export default function DashboardLayout({ children }) {
                   key={href}
                   href={href}
                   onClick={() => setIsSidebarOpen(false)}
-                  className={`flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium text-sm transition ${
-                    active
-                      ? 'bg-gradient-to-r from-emerald-500/20 via-indigo-500/10 to-purple-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
-                      : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
-                  }`}
+                  className={`flex items-center gap-3 px-4 py-2.5 rounded-xl font-medium text-sm transition ${active
+                    ? 'bg-gradient-to-r from-emerald-500/20 via-indigo-500/10 to-purple-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                    : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-200'
+                    }`}
                 >
                   <Icon size={16} strokeWidth={1.8} className={active ? 'text-emerald-400' : 'text-slate-500'} />
                   {label}
                 </Link>
               );
             })}
+
           </nav>
         </div>
 
         {/* Bottom user info + logout */}
         <div className="pt-5 border-t border-slate-800/80 mt-auto space-y-3">
+          {/* Auth Server — quick links (compact, one line) */}
+          <div className="px-1 space-y-1.5">
+            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Auth Server</p>
+            <div className="flex items-center gap-2.5 text-xs">
+              <a
+                href={`${authServerUrl}/`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-400 hover:text-emerald-400 transition"
+              >
+                Home
+              </a>
+              <span className="text-slate-700">·</span>
+              <a
+                href={`${authServerUrl}/privacy`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-400 hover:text-emerald-400 transition"
+              >
+                Privacy
+              </a>
+              <span className="text-slate-700">·</span>
+              <a
+                href={`${authServerUrl}/terms`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-slate-400 hover:text-emerald-400 transition"
+              >
+                Terms
+              </a>
+            </div>
+          </div>
+
           {/* User display */}
           <div className="px-1 space-y-1">
             <p className="text-xs text-slate-400 truncate">{currentUser?.email || 'User'}</p>

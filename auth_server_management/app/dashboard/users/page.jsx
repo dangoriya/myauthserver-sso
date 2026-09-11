@@ -3,20 +3,18 @@ import { useEffect, useState, useCallback } from 'react';
 import TailwindSelect from '@/app/components/TailwindSelect';
 import TailwindCheckbox from '@/app/components/TailwindCheckbox';
 import TailwindModal from '@/app/components/TailwindModal';
-import { fetchAuthed } from '@/app/lib/auth';
+import { fetchAuthed, getStoredUser } from '@/app/lib/auth';
 
 export default function UserManagementPage() {
   const [users, setUsers] = useState([]);
   const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(false);
-  
+
   // Enforce 2FA Step-Up for ALL Users (moved from Google OAuth & 2FA menu)
   const [enforce2FAAll, setEnforce2FAAll] = useState(false);
   const [enforceLoading, setEnforceLoading] = useState(false);
   // Pending toggle action (shown in TailwindModal before committing)
-  const [pendingEnforce, setPendingEnforce] = useState(null); // { nextChecked: bool }
-  // Result modal shown after the toggle completes
-  const [enforceResult, setEnforceResult] = useState(null); // { tone, icon, title, description }
+  const [pendingEnforce, setPendingEnforce] = useState(null); // { action: 'enforce' | 'disable' }
 
   // Real-time backend filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -39,9 +37,18 @@ export default function UserManagementPage() {
   const [editName, setEditName] = useState('');
   const [editPicture, setEditPicture] = useState('');
   const [editRole, setEditRole] = useState('normal-user');
-  const [edit2FA, setEdit2FA] = useState(false);
   const [editActive, setEditActive] = useState(true);
   const [editError, setEditError] = useState('');
+
+  // Current logged-in user (for admin-only action visibility)
+  const [currentUser, setCurrentUser] = useState(null);
+  const isAdmin = currentUser?.is_admin || currentUser?.role === 'admin';
+
+  // Confirmation modal states for destructive actions
+  const [deleteConfirmUser, setDeleteConfirmUser] = useState(null);
+  const [reset2FAConfirmUser, setReset2FAConfirmUser] = useState(null);
+  const [disableConfirmUser, setDisableConfirmUser] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null); // 'delete' | 'reset-2fa' | 'disable' | null
 
   const fetchEnforce2FA = async () => {
     try {
@@ -55,11 +62,9 @@ export default function UserManagementPage() {
     }
   };
 
-  // Open the confirmation modal when the checkbox is clicked.
-  // The actual API call is deferred until the user clicks "Confirm"
-  // inside the modal, so cancelling simply discards the change.
-  const requestToggleEnforce2FAAll = (checked) => {
-    setPendingEnforce({ nextChecked: checked });
+  // Open the confirmation modal for enforce/disable actions
+  const requestToggleEnforce2FAAll = (action) => {
+    setPendingEnforce({ action });
   };
 
   const cancelEnforceToggle = () => {
@@ -67,8 +72,9 @@ export default function UserManagementPage() {
     setPendingEnforce(null);
   };
 
-  const handleToggleEnforce2FAAll = async (checked) => {
+  const handleToggleEnforce2FAAll = async (action) => {
     setEnforceLoading(true);
+    const checked = action === 'enforce';
     try {
       const gRes = await fetchAuthed('/api/v1/admin/google-settings');
       const gData = gRes.ok ? await gRes.json() : {};
@@ -92,38 +98,9 @@ export default function UserManagementPage() {
       setEnforce2FAAll(checked);
       setPendingEnforce(null);
 
-      if (checked) {
-        await fetchUsers();
-        const updated = saveData?.users_updated_to_require_2fa ?? 0;
-        setEnforceResult({
-          tone: 'emerald',
-          icon: '✅',
-          title: '2FA enforcement enabled',
-          description:
-            `${updated} user account${updated === 1 ? '' : 's'} ` +
-            `updated to require 2FA on next login.`,
-          details:
-            'Users without a TOTP secret will see the "Setup" badge and ' +
-            'will be prompted to configure 2FA on their next login.',
-        });
-      } else {
-        setEnforceResult({
-          tone: 'amber',
-          icon: '🛈',
-          title: '2FA enforcement disabled',
-          description: 'Global 2FA requirement has been turned off.',
-          details:
-            'Individual user 2FA settings are still respected; users who ' +
-            'already configured 2FA will keep it on their profile.',
-        });
-      }
+      await fetchUsers();
     } catch (err) {
-      setEnforceResult({
-        tone: 'rose',
-        icon: '⚠️',
-        title: 'Failed to update 2FA enforcement',
-        description: err.message,
-      });
+      console.error(err);
       await fetchEnforce2FA();
     } finally {
       setEnforceLoading(false);
@@ -159,6 +136,7 @@ export default function UserManagementPage() {
   };
 
   useEffect(() => {
+    setCurrentUser(getStoredUser());
     fetchUsers();
     fetchRoles();
     fetchEnforce2FA();
@@ -172,16 +150,16 @@ export default function UserManagementPage() {
       const res = await fetchAuthed('/api/v1/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          email, 
-          name, 
+        body: JSON.stringify({
+          email,
+          name,
           picture,
-          password, 
-          role: userRole, 
-          is_admin: userRole === 'admin',
-          is_2fa_enabled: is2FAEnabled 
+          password,
+          roles: userRole,
+          is_2fa_enabled: is2FAEnabled,
+          is_2fa_activated: false  // New users start with 2FA not activated
         })
-      });
+      })
 
       if (!res.ok) {
         const data = await res.json();
@@ -206,7 +184,6 @@ export default function UserManagementPage() {
     setEditName(user.name || '');
     setEditPicture(user.picture || '');
     setEditRole(user.role || 'normal-user');
-    setEdit2FA(!!user.is_2fa_enabled);
     setEditActive(!!user.is_active);
     setEditError('');
   };
@@ -216,18 +193,19 @@ export default function UserManagementPage() {
     if (!editingUser) return;
     setEditError('');
 
+    // Only update basic profile fields (2FA is handled by separate buttons)
+    const payload = {
+      name: editName,
+      picture: editPicture,
+      roles: editRole,
+      is_active: editActive
+    };
+
     try {
       const res = await fetchAuthed(`/api/v1/admin/users/${editingUser.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: editName,
-          picture: editPicture,
-          role: editRole,
-          is_admin: editRole === 'admin',
-          is_2fa_enabled: edit2FA,
-          is_active: editActive
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!res.ok) {
@@ -242,13 +220,26 @@ export default function UserManagementPage() {
     }
   };
 
-  const toggleUserStatus = async (user) => {
-    await fetchAuthed(`/api/v1/admin/users/${user.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_active: !user.is_active })
-    });
-    fetchUsers();
+  const confirmDisableUser = async () => {
+    if (!disableConfirmUser) return;
+    setActionLoading('disable');
+    try {
+      const res = await fetchAuthed(`/api/v1/admin/users/${disableConfirmUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: !disableConfirmUser.is_active })
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'Failed to update user status');
+      }
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(null);
+      setDisableConfirmUser(null);
+    }
   };
 
   const resetUser2FA = async (user) => {
@@ -258,6 +249,47 @@ export default function UserManagementPage() {
       body: JSON.stringify({ reset_2fa: true })
     });
     fetchUsers();
+  };
+
+  const deleteUser = async (user) => {
+    setActionLoading('delete');
+    try {
+      const res = await fetchAuthed(`/api/v1/admin/users/${user.id}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'Failed to delete user');
+      }
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(null);
+      setDeleteConfirmUser(null);
+    }
+  };
+
+  const confirmReset2FA = async () => {
+    if (!reset2FAConfirmUser) return;
+    setActionLoading('reset-2fa');
+    try {
+      const res = await fetchAuthed(`/api/v1/admin/users/${reset2FAConfirmUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reset_2fa: true })
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || 'Failed to reset 2FA');
+      }
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(null);
+      setReset2FAConfirmUser(null);
+    }
   };
 
   const roleFilterOptions = [
@@ -294,24 +326,33 @@ export default function UserManagementPage() {
         </button>
       </div>
 
-      {/* Enforce Global 2FA Policy Card (Moved here as requested) */}
-      <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+      {/* Global 2FA Setup Section */}
+      <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 shadow-xl">
+        <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 flex items-center justify-center font-bold text-lg">
             🔐
           </div>
           <div>
-            <h3 className="font-semibold text-amber-300 text-sm">Enforce 2FA Step-up for ALL Users</h3>
-            <p className="text-xs text-slate-400">Mandate two-factor TOTP authentication for every user logging into IAM system</p>
+            <h3 className="font-semibold text-amber-300 text-sm">Global 2FA Setup</h3>
+            <p className="text-xs text-slate-400">Configure two-factor authentication policy for all users</p>
           </div>
         </div>
-        <TailwindCheckbox
-          id="enforce-2fa-all-users"
-          checked={enforce2FAAll}
-          onChange={(e) => requestToggleEnforce2FAAll(e.target.checked)}
-          color="amber"
-          disabled={enforceLoading}
-        />
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={() => requestToggleEnforce2FAAll('enforce')}
+            disabled={enforceLoading}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#625e58] to-orange-500 text-white font-semibold text-sm hover:opacity-95 transition shadow-lg shadow-amber-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            <span>🔒 Enforce 2FA</span>
+          </button>
+          <button
+            onClick={() => requestToggleEnforce2FAAll('disable')}
+            disabled={enforceLoading}
+            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-slate-600 to-slate-700 text-slate-200 font-semibold text-sm hover:bg-slate-600/80 transition shadow-lg shadow-slate-500/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 border border-slate-700"
+          >
+            <span>⏸️ Disable Temporary</span>
+          </button>
+        </div>
       </div>
 
       {/* Real-time Filter Bar (Backend API Filter) */}
@@ -401,9 +442,9 @@ export default function UserManagementPage() {
                   <td className="p-4">
                     {(() => {
                       // 2FA status logic:
-                      //   is_2fa_enabled = false        → "Off" (grey)
-                      //   is_2fa_enabled = true, secret → "Active" (amber, TOTP configured)
-                      //   is_2fa_enabled = true, no secret → "Setup" (blue, user must configure)
+                      //   is_2fa_enabled = false → "Off" (grey)
+                      //   is_2fa_enabled = true AND is_2fa_activated = true → "Active" (amber)
+                      //   is_2fa_enabled = true AND is_2fa_activated = false → "Setup" (blue)
                       if (!u.is_2fa_enabled) {
                         return (
                           <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700">
@@ -411,7 +452,7 @@ export default function UserManagementPage() {
                           </span>
                         );
                       }
-                      if (u.has_2fa_configured) {
+                      if (u.is_2fa_enabled && u.is_2fa_activated) {
                         return (
                           <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 inline-flex items-center gap-1">
                             🔐 Active
@@ -441,11 +482,33 @@ export default function UserManagementPage() {
                       </button>
 
                       <button
-                        onClick={() => toggleUserStatus(u)}
+                        onClick={() => setDisableConfirmUser(u)}
                         className={`text-xs px-3 py-1.5 rounded-lg border transition ${u.is_active ? 'border-rose-500/30 text-rose-400 hover:bg-rose-500/10' : 'border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10'}`}
                       >
                         {u.is_active ? 'Disable' : 'Enable'}
                       </button>
+
+                      {isAdmin && (
+                        <>
+                          <button
+                            onClick={() => setReset2FAConfirmUser(u)}
+                            disabled={actionLoading === 'reset-2fa'}
+                            className="text-xs px-3 py-1.5 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-300 hover:bg-sky-500/20 transition flex items-center gap-1 font-medium"
+                            title="Reset 2FA"
+                          >
+                            🔐 Reset 2FA
+                          </button>
+
+                          <button
+                            onClick={() => setDeleteConfirmUser(u)}
+                            disabled={actionLoading === 'delete'}
+                            className="text-xs px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20 transition flex items-center gap-1 font-medium"
+                            title="Delete Account"
+                          >
+                            🗑️ Delete
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -514,37 +577,145 @@ export default function UserManagementPage() {
 
               <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
                 <TailwindCheckbox
-                  id="edit-2fa-enabled"
-                  checked={edit2FA}
-                  onChange={(e) => setEdit2FA(e.target.checked)}
-                  label="Enforce 2FA Step-Up for this user"
-                  color="amber"
-                />
-                <TailwindCheckbox
                   id="edit-active-status"
                   checked={editActive}
                   onChange={(e) => setEditActive(e.target.checked)}
                   label="User Account Active Status"
                   color="emerald"
                 />
+              </div>
 
-                {editingUser?.has_2fa_configured && (
-                  <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
-                    <span className="text-xs text-slate-400">2FA Key Configured:</span>
+              {/* 2FA Management Section */}
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
+                <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                  Two-Factor Authentication (2FA)
+                </h3>
+                
+                {/* Current 2FA Status */}
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-slate-400">Current Status:</span>
+                  {(() => {
+                    if (!editingUser?.is_2fa_enabled) {
+                      return <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">Off</span>;
+                    }
+                    if (editingUser?.is_2fa_enabled && editingUser?.is_2fa_activated) {
+                      return <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">Active</span>;
+                    }
+                    return <span className="px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300 border border-sky-500/30">Setup</span>;
+                  })()}
+                  {editingUser?.has_2fa_configured && (
+                    <span className="text-slate-500">(Key configured)</span>
+                  )}
+                </div>
+
+                {/* 2FA Action Buttons */}
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {!editingUser?.is_2fa_enabled ? (
                     <button
                       type="button"
-                      onClick={async () => {
-                        if (confirm(`Reset 2FA configuration for ${editingUser.email}?`)) {
-                          await resetUser2FA(editingUser);
-                          setEditingUser(null);
+                      onClick={() => {
+                        if (confirm(`Enable 2FA requirement for ${editingUser.email}? User will be prompted to set up 2FA on next login.`)) {
+                          fetchAuthed(`/api/v1/admin/users/${editingUser.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ enable_2fa: true })
+                          }).then(async (res) => {
+                            if (res.ok) {
+                              fetchUsers();
+                              setEditingUser(null);
+                            } else {
+                              const data = await res.json().catch(() => ({}));
+                              setEditError(data.detail || 'Failed to enable 2FA');
+                            }
+                          });
                         }
                       }}
-                      className="text-xs px-2.5 py-1 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20 font-medium"
+                      className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 transition font-medium"
+                      title="Enable 2FA requirement for this user"
                     >
-                      Reset 2FA Secret Key
+                      ✅ Enable 2FA
                     </button>
-                  </div>
-                )}
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (confirm(`Temporarily disable 2FA requirement for ${editingUser.email}? User will no longer be prompted for 2FA but their configuration will be preserved.`)) {
+                            fetchAuthed(`/api/v1/admin/users/${editingUser.id}`, {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ disable_2fa_temporary: true })
+                            }).then(async (res) => {
+                              if (res.ok) {
+                                fetchUsers();
+                                setEditingUser(null);
+                              } else {
+                                const data = await res.json().catch(() => ({}));
+                                setEditError(data.detail || 'Failed to disable 2FA');
+                              }
+                            });
+                          }
+                        }}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 transition font-medium"
+                        title="Temporarily disable 2FA requirement (keeps secret)"
+                      >
+                        ⏸️ Disable 2FA (Temporary)
+                      </button>
+                      
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (confirm(`Permanently disable 2FA for ${editingUser.email}? This will remove their 2FA requirement, deactivate 2FA, and clear their TOTP secret.`)) {
+                            fetchAuthed(`/api/v1/admin/users/${editingUser.id}`, {
+                              method: 'PUT',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ disable_2fa_permanent: true })
+                            }).then(async (res) => {
+                              if (res.ok) {
+                                fetchUsers();
+                                setEditingUser(null);
+                              } else {
+                                const data = await res.json().catch(() => ({}));
+                                setEditError(data.detail || 'Failed to disable 2FA permanently');
+                              }
+                            });
+                          }
+                        }}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20 transition font-medium"
+                        title="Permanently disable 2FA and clear secret"
+                      >
+                        🗑️ Disable 2FA (Permanent)
+                      </button>
+                    </>
+                  )}
+
+                  {editingUser?.has_2fa_configured && editingUser?.is_2fa_enabled && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm(`Reset 2FA configuration for ${editingUser.email}? User will need to set up 2FA again.`)) {
+                          fetchAuthed(`/api/v1/admin/users/${editingUser.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ reset_2fa: true })
+                          }).then(async (res) => {
+                            if (res.ok) {
+                              fetchUsers();
+                              setEditingUser(null);
+                            } else {
+                              const data = await res.json().catch(() => ({}));
+                              setEditError(data.detail || 'Failed to reset 2FA');
+                            }
+                          });
+                        }
+                      }}
+                      className="text-xs px-3 py-1.5 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sky-300 hover:bg-sky-500/20 transition font-medium"
+                      title="Reset 2FA secret (user must reconfigure)"
+                    >
+                      🔄 Reset 2FA Secret
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="flex gap-3 pt-2">
@@ -565,52 +736,52 @@ export default function UserManagementPage() {
           <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl max-w-md w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-xl font-bold text-white mb-4">Create IAM User</h2>
             {error && <div className="p-3 mb-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs">{error}</div>}
-            
+
             <form onSubmit={handleCreateUser} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Email</label>
-                <input 
-                  type="email" 
-                  required 
-                  value={email} 
-                  onChange={(e) => setEmail(e.target.value)} 
-                  className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm" 
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Full Name</label>
-                <input 
-                  type="text" 
-                  value={name} 
-                  onChange={(e) => setName(e.target.value)} 
-                  className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm" 
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Profile Picture URL (Optional)</label>
-                <input 
-                  type="text" 
-                  value={picture} 
-                  onChange={(e) => setPicture(e.target.value)} 
+                <input
+                  type="text"
+                  value={picture}
+                  onChange={(e) => setPicture(e.target.value)}
                   placeholder="https://example.com/photo.jpg"
-                  className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm" 
+                  className="w-full px-3.5 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-400 mb-1">Password</label>
                 <div className="relative">
-                  <input 
-                    type={showPassword ? 'text' : 'password'} 
-                    required 
-                    value={password} 
-                    onChange={(e) => setPassword(e.target.value)} 
-                    className="w-full px-3.5 py-2.5 pr-10 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm" 
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-3.5 py-2.5 pr-10 bg-slate-800 border border-slate-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm"
                   />
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
                   >
@@ -648,60 +819,111 @@ export default function UserManagementPage() {
         </div>
       )}
 
-      {/* Confirm toggle: Enforce 2FA Step-up for ALL Users */}
+      {/* Confirm toggle: Global 2FA Setup */}
       <TailwindModal
         open={!!pendingEnforce}
         onClose={cancelEnforceToggle}
-        onConfirm={() => handleToggleEnforce2FAAll(pendingEnforce?.nextChecked)}
+        onConfirm={() => handleToggleEnforce2FAAll(pendingEnforce?.action)}
         title={
-          pendingEnforce?.nextChecked
+          pendingEnforce?.action === 'enforce'
             ? 'Enable 2FA for all users?'
             : 'Disable global 2FA enforcement?'
         }
         description={
-          pendingEnforce?.nextChecked
+          pendingEnforce?.action === 'enforce'
             ? 'This will mark every user account as 2FA-required.'
-            : 'Global enforcement will be turned off; per-user settings still apply.'
+            : 'Global enforcement will be turned off and 2FA requirement will be temporarily disabled for all users.'
         }
-        icon={pendingEnforce?.nextChecked ? '🔐' : '🛡️'}
-        tone={pendingEnforce?.nextChecked ? 'amber' : 'rose'}
-        confirmLabel={pendingEnforce?.nextChecked ? 'Enable 2FA' : 'Disable'}
+        icon={pendingEnforce?.action === 'enforce' ? '🔐' : '🛡️'}
+        tone={pendingEnforce?.action === 'enforce' ? 'amber' : 'rose'}
+        confirmLabel={pendingEnforce?.action === 'enforce' ? 'Enable 2FA' : 'Disable Temporary'}
         cancelLabel="Cancel"
         loading={enforceLoading}
       >
-        {pendingEnforce?.nextChecked ? (
+        {pendingEnforce?.action === 'enforce' ? (
           <ul className="space-y-2 list-disc list-inside text-slate-300">
-            <li>Sets <code className="text-amber-300 font-mono">is_2fa_enabled = true</code> on every user account.</li>
+            <li>Sets <code className="text-amber-300 font-mono">is_2fa_enabled = true</code> on every user account that doesn't already have it.</li>
             <li>On next login, users without a configured TOTP secret will be routed to the 2FA setup page.</li>
             <li>Existing sessions remain valid until expiry.</li>
+            <li>Users who already have 2FA activated will continue to use it normally.</li>
           </ul>
         ) : (
           <ul className="space-y-2 list-disc list-inside text-slate-300">
-            <li>2FA will no longer be forced on login.</li>
-            <li>Individual user 2FA settings are still respected.</li>
-            <li>Users who already configured 2FA will keep it on their profile.</li>
+            <li>Sets <code className="text-amber-300 font-mono">is_2fa_enabled = false</code> on all user accounts.</li>
+            <li>2FA requirement will be temporarily disabled for all users.</li>
+            <li>Individual 2FA configurations (secrets, activation status) are preserved.</li>
+            <li>Users can still log in without 2FA until global enforcement is re-enabled.</li>
           </ul>
         )}
       </TailwindModal>
 
-      {/* Result feedback after the toggle completes */}
+      {/* Delete Account Confirmation Modal (Admin only) */}
       <TailwindModal
-        open={!!enforceResult}
-        onClose={() => setEnforceResult(null)}
-        onConfirm={() => setEnforceResult(null)}
-        title={enforceResult?.title || ''}
-        description={enforceResult?.description}
-        icon={enforceResult?.icon}
-        tone={enforceResult?.tone || 'emerald'}
-        confirmLabel="OK"
-        cancelLabel="Close"
-        showSingleButton
+        open={!!deleteConfirmUser}
+        onClose={() => setDeleteConfirmUser(null)}
+        onConfirm={() => deleteUser(deleteConfirmUser)}
+        title="Delete User Account?"
+        description={`This action cannot be undone. ${deleteConfirmUser?.email || 'user'}`}
+        icon="🗑️"
+        tone="rose"
+        confirmLabel="Delete Account"
+        cancelLabel="Cancel"
+        loading={actionLoading === 'delete'}
       >
-        {enforceResult?.details && (
-          <p className="text-slate-400 text-xs leading-relaxed">
-            {enforceResult.details}
-          </p>
-        )}
+        <ul className="space-y-2 list-disc list-inside text-slate-300">
+          <li>Permanently removes the user account and all associated credentials.</li>
+          <li>The user will no longer be able to sign in.</li>
+          <li>Any active sessions will be invalidated.</li>
+        </ul>
+      </TailwindModal>
+
+      {/* Disable/Enable User Confirmation Modal (Admin only) */}
+      <TailwindModal
+        open={!!disableConfirmUser}
+        onClose={() => setDisableConfirmUser(null)}
+        onConfirm={confirmDisableUser}
+        title={disableConfirmUser?.is_active ? 'Disable User Account?' : 'Enable User Account?'}
+        description={`This action affects ${disableConfirmUser?.email || 'user'}.`}
+        icon={disableConfirmUser?.is_active ? '🚫' : '✅'}
+        tone={disableConfirmUser?.is_active ? 'rose' : 'emerald'}
+        confirmLabel={disableConfirmUser?.is_active ? 'Disable Account' : 'Enable Account'}
+        cancelLabel="Cancel"
+        loading={actionLoading === 'disable'}
+      >
+        <ul className="space-y-2 list-disc list-inside text-slate-300">
+          {disableConfirmUser?.is_active ? (
+            <>
+              <li>Disabling this user prevents them from signing in.</li>
+              <li>Active sessions remain valid until they expire.</li>
+              <li>The account can be re-enabled at any time from this screen.</li>
+            </>
+          ) : (
+            <>
+              <li>Re-enabling this user restores their access immediately.</li>
+              <li>The user will be able to sign in again.</li>
+            </>
+          )}
+        </ul>
+      </TailwindModal>
+
+      {/* Reset 2FA Confirmation Modal (Admin only) */}
+      <TailwindModal
+        open={!!reset2FAConfirmUser}
+        onClose={() => setReset2FAConfirmUser(null)}
+        onConfirm={confirmReset2FA}
+        title="Reset 2FA for this user?"
+        description={`User will need to set up 2FA again on next login. ${reset2FAConfirmUser?.email || 'user'}`}
+        icon="🔐"
+        tone="amber"
+        confirmLabel="Reset 2FA"
+        cancelLabel="Cancel"
+        loading={actionLoading === 'reset-2fa'}
+      >
+        <ul className="space-y-2 list-disc list-inside text-slate-300">
+          <li>Clears the current TOTP secret key.</li>
+          <li>User will remain 2FA-required but must reconfigure with a new QR code.</li>
+          <li>2FA status will show as "Setup" until user completes verification.</li>
+        </ul>
       </TailwindModal>
     </div>
   );

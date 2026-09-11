@@ -16,12 +16,18 @@ class Settings(BaseSettings):
     
     REDIS_HOST: str = "redis"
     REDIS_PORT: int = 6379
+    REDIS_PASSWORD: str = ""
     REDIS_URL: str = ""
 
     @model_validator(mode="after")
     def build_redis_url(self):
         if not self.REDIS_URL:
-            self.REDIS_URL = f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
+            if self.REDIS_PASSWORD:
+                from urllib.parse import quote_plus
+                encoded_password = quote_plus(self.REDIS_PASSWORD)
+                self.REDIS_URL = f"redis://:{encoded_password}@{self.REDIS_HOST}:{self.REDIS_PORT}/0"
+            else:
+                self.REDIS_URL = f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}/0"
         return self
     
     @model_validator(mode="after")
@@ -30,6 +36,8 @@ class Settings(BaseSettings):
             self.CENTRAL_DASHBOARD_URL = self.MANAGEMENT_URL
         if not self.LOGOUT_REDIRECT_URL:
             self.LOGOUT_REDIRECT_URL = self.MANAGEMENT_URL
+        if not self.POST_LOGOUT_REDIRECT_URL:
+            self.POST_LOGOUT_REDIRECT_URL = self.LOGOUT_REDIRECT_URL
         return self
     
     AUTH_SERVER_URL: str = "http://localhost:8000"
@@ -37,15 +45,22 @@ class Settings(BaseSettings):
     CENTRAL_DASHBOARD_URL: str = ""
     LOGOUT_REDIRECT_URL: str = ""
 
+    # Global post-logout redirect URL. When a client has no
+    # post_logout_redirect_uris registered (blank/None), the RP-initiated
+    # logout endpoint redirects the browser here instead of erroring.
+    # Falls back to LOGOUT_REDIRECT_URL when not configured.
+    POST_LOGOUT_REDIRECT_URL: str = ""
+
     BACKCHANNEL_LOGOUT_ENABLED: bool = False
 
     # Email Service Settings (SMTP or Brevo API)
     EMAIL_PROVIDER: str = "smtp"  # "smtp" or "brevo_api"
-    SMTP_HOST: str = "smtp.brevo.com"
+    SMTP_HOST: str = "smtp-relay.brevo.com"
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_USE_TLS: bool = True
+    SMTP_USE_SSL: bool = False  # Implicit TLS (port 465)
 
     BREVO_API_KEY: str = ""
     EMAIL_FROM: str = "no-reply@myauth.local"

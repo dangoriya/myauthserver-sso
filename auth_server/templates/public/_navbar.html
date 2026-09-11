@@ -1,0 +1,23 @@
+{# Public site top navbar. Renders the logo + nav links + a Sign in button.
+   Set `active` to highlight the current page. #}
+<nav class="public-nav" aria-label="Primary">
+  <div class="public-nav-inner">
+    <a class="public-brand" href="/">
+      <img src="/static/img/logo.svg" alt="" width="36" height="36"/>
+      <span class="public-brand-text">
+        <strong>IAM Auth</strong>
+        <small>auth.dilipdangoriya.com.np</small>
+      </span>
+    </a>
+
+    <div class="public-nav-links">
+      <a href="/"          class="{% if active == 'home'    %}is-active{% endif %}">Home</a>
+      <a href="/#features" class="{% if active == 'features' %}is-active{% endif %}">Features</a>
+      <a href="/#apps"     class="{% if active == 'apps'    %}is-active{% endif %}">Connected Apps</a>
+      <a href="/privacy"   class="{% if active == 'privacy' %}is-active{% endif %}">Privacy</a>
+      <a href="/terms"     class="{% if active == 'terms'   %}is-active{% endif %}">Terms</a>
+    </div>
+
+    <a class="public-nav-cta" href="/authorize">Sign in</a>
+  </div>
+</nav>

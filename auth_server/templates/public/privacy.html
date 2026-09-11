@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{# Public privacy policy for auth.dilipdangoriya.com.np
+Used for Google Auth Platform "Privacy policy" verification. #}
+
+{% block title %}Privacy Policy — IAM Auth Server{% endblock %}
+
+{% block content %}
+{% set effective = "2026-09-07" %}
+{% set last_updated = effective %}
+
+{% include "public/_navbar.html" %}
+
+<main class="public-main public-doc">
+  <header class="public-doc-head">
+    <p class="public-eyebrow">Legal</p>
+    <h1>Privacy Policy</h1>
+    <p class="public-sub">
+      <strong>Service:</strong> IAM Auth Server (auth.dilipdangoriya.com.np)<br />
+      <strong>Operator:</strong> Dilip Dangoriya, Nepal<br />
+      <strong>Contact:</strong> <a href="mailto:dilipdangoriya@gmail.com">dilipdangoriya@gmail.com</a><br />
+      <strong>Effective date:</strong> {{ effective }}
+    </p>
+  </header>
+
+  <nav class="public-toc" aria-label="Table of contents">
+    <strong>On this page</strong>
+    <a href="#scope">1. Scope</a>
+    <a href="#data">2. What data we collect</a>
+    <a href="#use">3. How we use it</a>
+    <a href="#google">4. Google sign-in (OAuth)</a>
+    <a href="#sharing">5. Sharing &amp; sub-processors</a>
+    <a href="#retention">6. Retention</a>
+    <a href="#security">7. Security</a>
+    <a href="#rights">8. Your rights</a>
+    <a href="#transfers">9. International transfers</a>
+    <a href="#children">10. Children's privacy</a>
+    <a href="#changes">11. Changes to this policy</a>
+    <a href="#contact">12. Contact</a>
+  </nav>
+
+  <section id="scope">
+    <h2>1. Scope</h2>
+    <p>This Privacy Policy explains how the IAM Auth Server (the
+      <em>Service</em>) — operated by Dilip Dangoriya (the <em>Operator</em>) — collects,
+      uses, stores, and shares personal information when you sign in to the Service
+      or use a connected application on the
+      <code>dilipdangoriya.com.np</code> family of domains.
+    </p>
+    <p>Connected applications include (but are not limited to):
+      <code>dilipdangoriya.com.np</code>,
+      <code>calender.dilipdangoriya.com.np</code>,
+      <code>live.dilipdangoriya.com.np</code>,
+      <code>meroshare.dilipdangoriya.com.np</code>, and
+      <code>play.dilipdangoriya.com.np</code>. The list may grow over time; the latest
+      list is always available on our <a href="/">home page</a>.
+    </p>
+  </section>
+
+  <section id="data">
+    <h2>2. What data we collect</h2>
+    <p>We collect the minimum information needed to authenticate you and let you
+      sign in across connected apps. This includes:</p>
+    <ul>
+      <li><strong>Account identifiers:</strong> email address (used as your unique
+        sign-in handle), display name, and (optionally) profile picture.</li>
+      <li><strong>Authentication data:</strong> a salted &amp; hashed password (only if
+        you create a local account instead of signing in with Google); your
+        TOTP secret (only if you enable two-factor authentication).</li>
+      <li><strong>Security &amp; operational data:</strong> sign-in timestamps, IP
+        address, user-agent, and a short audit log of security-relevant events
+        (sign-in, sign-out, password change, 2FA enable/disable, etc.).</li>
+      <li><strong>Application access data:</strong> which connected application
+        initiated the sign-in (the OIDC <code>client_id</code>) and the requested
+        scopes.</li>
+    </ul>
+    <p>We do <strong>not</strong> collect browsing history, contacts, location, or any
+      data outside what is described above.</p>
+  </section>
+
+  <section id="use">
+    <h2>3. How we use it</h2>
+    <p>We use the data above to:</p>
+    <ul>
+      <li>Authenticate you when you sign in (locally or via Google).</li>
+      <li>Issue short-lived, signed identity tokens to the connected application
+        you are signing in to.</li>
+      <li>Protect your account (rate-limiting, 2FA, suspicious-activity review).</li>
+      <li>Send you security-related emails: email verification codes on sign-up,
+        password-reset links, 2FA disable/reset confirmation codes, and a one-time
+        welcome email after your account is created.</li>
+    </ul>
+    <p>We do not use your data for advertising, profiling, or sale to third parties.</p>
+  </section>
+
+  <section id="google">
+    <h2>4. Google sign-in (OAuth)</h2>
+    <p>The Service offers <em>Sign in with Google</em>. When you choose this option,
+      Google authenticates you and sends us a limited profile. We request and store
+      only the following OAuth scopes:</p>
+    <ul>
+      <li><code>openid</code> — to identify you uniquely across sign-ins.</li>
+      <li><code>email</code> — your verified email address (also used as your sign-in handle).</li>
+      <li><code>profile</code> — your display name and profile picture.</li>
+    </ul>
+    <p>We do <strong>not</strong> request access to your Gmail, contacts, Drive,
+      Calendar, or any other Google service. Google's handling of your data is
+      governed by <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google's Privacy
+        Policy</a>.</p>
+    <p>You can revoke the Service's access to your Google account at any time from
+      <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">your Google account permissions
+        page</a>.
+    </p>
+  </section>
+
+  <section id="sharing">
+    <h2>5. Sharing &amp; sub-processors</h2>
+    <p>We share your data only with:</p>
+    <ul>
+      <li><strong>Connected applications</strong> you sign in to. They receive the
+        minimum fields they need (typically your email, name, and a unique user id)
+        inside a signed OIDC identity token.</li>
+      <li><strong>Google</strong>, when you use Google sign-in (as described above).</li>
+      <li><strong>Email delivery provider</strong> (currently SMTP/Brevo), used solely
+        to send you security and account-related emails.</li>
+    </ul>
+    <p>We do not sell, rent, or share your data with advertisers, data brokers, or
+      analytics providers.</p>
+  </section>
+
+  <section id="retention">
+    <h2>6. Retention</h2>
+    <ul>
+      <li>Account data (email, name, picture, hashed password, 2FA secret) is kept
+        for as long as your account is active.</li>
+      <li>Sign-in and security audit logs are kept for up to <strong>30 days</strong>.</li>
+      <li>Short-lived verification codes (email verification, password reset, 2FA
+        disable/reset) expire automatically within <strong>10 minutes</strong>.</li>
+      <li>On account deletion, all personal data is removed from primary storage
+        within <strong>30 days</strong>. Backups are rotated within 90 days.</li>
+    </ul>
+  </section>
+
+  <section id="security">
+    <h2>7. Security</h2>
+    <p>We protect your data with industry-standard measures, including:</p>
+    <ul>
+      <li>Passwords stored as <strong>bcrypt</strong> hashes.</li>
+      <li>Short-lived, signed tokens for email verification, password reset, and
+        2FA operations.</li>
+      <li>Rate limiting on sign-in, sign-up, OTP, and password-reset endpoints.</li>
+      <li>HTTP-only, secure session cookies.</li>
+      <li>Optional TOTP-based two-factor authentication.</li>
+    </ul>
+    <p>No method of transmission or storage is 100% secure. If you believe your
+      account has been compromised, change your password immediately and contact
+      <a href="mailto:dilipdangoriya@gmail.com">dilipdangoriya@gmail.com</a>.
+    </p>
+  </section>
+
+  <section id="rights">
+    <h2>8. Your rights</h2>
+    <p>You can at any time:</p>
+    <ul>
+      <li><strong>Access</strong> the personal data we hold about you (via the
+        Profile page in the management portal).</li>
+      <li><strong>Correct</strong> your name and profile picture from the Profile page.</li>
+      <li><strong>Change your password</strong> or <strong>reset your 2FA</strong>
+        from the Profile page.</li>
+      <li><strong>Delete your account</strong> by contacting
+        <a href="mailto:dilipdangoriya@gmail.com">dilipdangoriya@gmail.com</a>. We
+        will delete your account and associated data within 30 days.
+      </li>
+      <li><strong>Revoke Google access</strong> at
+        <a href="https://myaccount.google.com/permissions" target="_blank"
+          rel="noopener">myaccount.google.com/permissions</a>.
+      </li>
+    </ul>
+  </section>
+
+  <section id="transfers">
+    <h2>9. International transfers</h2>
+    <p>The Service is operated from Nepal. Your data may be processed in
+      countries other than your own. By using the Service, you understand that
+      your data may be transferred to, stored, and processed in countries whose
+      data-protection laws may differ from those in your country of residence.</p>
+  </section>
+
+  <section id="children">
+    <h2>10. Children's privacy</h2>
+    <p>The Service is intended for use by adults (18 years or older) operating
+      internal tools. We do not knowingly collect personal data from children
+      under 18. If you believe a child has provided us with personal data,
+      please contact us so we can delete it.</p>
+  </section>
+
+  <section id="changes">
+    <h2>11. Changes to this policy</h2>
+    <p>We may update this Privacy Policy from time to time. The <em>effective date</em>
+      at the top of this page reflects when this version took effect.
+      Material changes will be communicated by a notice on the home page and, where
+      appropriate, by email.</p>
+  </section>
+
+  <section id="contact">
+    <h2>12. Contact</h2>
+    <p>For any privacy-related question, request, or complaint, please contact:</p>
+    <p>
+      Dilip Dangoriya<br />
+      Email: <a href="mailto:dilipdangoriya@gmail.com">dilipdangoriya@gmail.com</a><br />
+      Service URL: <a href="https://auth.dilipdangoriya.com.np/">auth.dilipdangoriya.com.np</a>
+    </p>
+  </section>
+</main>
+
+{% include "public/_footer.html" %}
+{% endblock %}

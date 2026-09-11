@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from database import get_db
 from models import User, Role, ClientApp, GoogleSetting
+from config import settings
 from auth_utils import (
     decode_token, create_admin_token, verify_password, get_password_hash,
     generate_totp_secret, get_totp_uri, generate_qr_code_data_uri, verify_totp_code
@@ -50,7 +51,7 @@ def sso_ping(payload=Depends(verify_token)):
     return {
         "ok": True,
         "user_id": payload.get("sub"),
-        "role": payload.get("role"),
+        "roles": payload.get("roles", []),
     }
 
 
@@ -78,7 +79,7 @@ def sso_logout(request: Request, data: SSOLogoutSchema, payload=Depends(verify_t
     from logout import perform_centralized_logout
 
     target = data.user_id or payload.get("sub")
-    is_admin = payload.get("role") == "admin" or payload.get("is_admin")
+    is_admin = "admin" in payload.get("roles", [])
     if data.user_id and data.user_id != payload.get("sub") and not is_admin:
         raise HTTPException(status_code=403, detail="Admin privileges required")
 
@@ -104,7 +105,7 @@ def sso_logout(request: Request, data: SSOLogoutSchema, payload=Depends(verify_t
 
 
 def verify_admin(payload=Depends(verify_token)):
-    if payload.get("role") != "admin" and not payload.get("is_admin"):
+    if "admin" not in payload.get("roles", []):
         raise HTTPException(status_code=403, detail="Admin privileges required")
     return payload
 
@@ -137,19 +138,22 @@ class UserCreateSchema(BaseModel):
     email: str
     name: Optional[str] = None
     password: str
-    role: str = "normal-user"
-    is_admin: bool = False
+    roles: str = "normal-user"
     is_2fa_enabled: bool = False
+    is_2fa_activated: bool = False
 
 class UserUpdateSchema(BaseModel):
     name: Optional[str] = None
     picture: Optional[str] = None
-    role: Optional[str] = None
+    roles: Optional[str] = None
     is_active: Optional[bool] = None
-    is_admin: Optional[bool] = None
     is_2fa_enabled: Optional[bool] = None
+    is_2fa_activated: Optional[bool] = None
     password: Optional[str] = None
     reset_2fa: Optional[bool] = False
+    disable_2fa_temporary: Optional[bool] = False
+    disable_2fa_permanent: Optional[bool] = False
+    enable_2fa: Optional[bool] = False
 
 class RoleCreateSchema(BaseModel):
     name: str
@@ -166,6 +170,17 @@ class ClientCreateSchema(BaseModel):
     client_name: str
     redirect_uris: str
     is_sso_enabled: bool = True
+    post_logout_redirect_uris: Optional[str] = None
+    backchannel_logout_uris: Optional[str] = None
+    backchannel_logout_enabled: bool = False
+
+class ClientUpdateSchema(BaseModel):
+    client_name: Optional[str] = None
+    redirect_uris: Optional[str] = None
+    is_sso_enabled: Optional[bool] = None
+    post_logout_redirect_uris: Optional[str] = None
+    backchannel_logout_uris: Optional[str] = None
+    backchannel_logout_enabled: Optional[bool] = None
 
 class GoogleSettingSchema(BaseModel):
     client_id: str
@@ -181,9 +196,11 @@ class ChangePasswordSchema(BaseModel):
 class VerifyOldPasswordSchema(BaseModel):
     old_password: str
 
-class ResetPasswordConfirmSchema(BaseModel):
-    otp_code: str
+class SetNewPasswordSchema(BaseModel):
     new_password: str
+
+class VerifyOtpSchema(BaseModel):
+    otp_code: str
 
 class SetPasswordSchema(BaseModel):
     new_password: str
@@ -210,12 +227,18 @@ def iam_login(data: LoginSchema, db: Session = Depends(get_db)):
     g_setting = db.query(GoogleSetting).filter(GoogleSetting.id == 1).first()
     enforce_2fa = g_setting.enforce_2fa_all if g_setting else False
 
-    requires_2fa = user.is_2fa_enabled or enforce_2fa
+    requires_2fa = user.is_2fa_enabled
     if requires_2fa:
-        if not user.totp_secret:
-            secret = generate_totp_secret()
-            user.totp_secret = secret
-            db.commit()
+        # If 2FA is not activated (setup not completed), redirect to setup page
+        if not user.is_2fa_activated:
+            # Generate or reuse existing TOTP secret
+            if not user.totp_secret:
+                secret = generate_totp_secret()
+                user.totp_secret = secret
+                db.commit()
+            else:
+                secret = user.totp_secret
+            
             uri = get_totp_uri(secret, user.email)
             qr_uri = generate_qr_code_data_uri(uri)
             return {
@@ -226,13 +249,14 @@ def iam_login(data: LoginSchema, db: Session = Depends(get_db)):
                 "message": "2FA setup required"
             }
         else:
+            # 2FA is activated, redirect to verify page
             return {
                 "requires_2fa_verify": True,
                 "user_id": user.id,
                 "message": "2FA code required"
             }
     
-    token = create_admin_token(user.id, user.email, role=user.role or ("admin" if user.is_admin else "normal-user"))
+    token = create_admin_token(user.id, user.email, role=user.role)
     return {
         "access_token": token,
         "token_type": "Bearer",
@@ -240,9 +264,10 @@ def iam_login(data: LoginSchema, db: Session = Depends(get_db)):
             "id": user.id,
             "email": user.email,
             "name": user.name,
-            "role": user.role,
+            "roles": user.roles_list,
             "is_admin": user.is_admin,
             "is_2fa_enabled": user.is_2fa_enabled,
+            "is_2fa_activated": user.is_2fa_activated,
             "provider": user.provider
         }
     }
@@ -261,7 +286,10 @@ def iam_login_2fa_verify(data: IAMLogin2FAVerifySchema, db: Session = Depends(ge
     if not verify_totp_code(user.totp_secret, data.totp_code):
         raise HTTPException(status_code=400, detail="Invalid 2FA verification code")
 
-    token = create_admin_token(user.id, user.email, role=user.role or ("admin" if user.is_admin else "normal-user"))
+    user.is_2fa_activated = True
+    db.commit()
+
+    token = create_admin_token(user.id, user.email, role=user.role)
     return {
         "access_token": token,
         "token_type": "Bearer",
@@ -269,9 +297,10 @@ def iam_login_2fa_verify(data: IAMLogin2FAVerifySchema, db: Session = Depends(ge
             "id": user.id,
             "email": user.email,
             "name": user.name,
-            "role": user.role,
+            "roles": user.roles_list,
             "is_admin": user.is_admin,
             "is_2fa_enabled": user.is_2fa_enabled,
+            "is_2fa_activated": user.is_2fa_activated,
             "provider": user.provider
         }
     }
@@ -300,6 +329,7 @@ def oidc_2fa_stepup(data: OIDCStepupSchema, db: Session = Depends(get_db)):
 
     if data.is_setup:
         user.is_2fa_enabled = True
+        user.is_2fa_activated = True
         db.commit()
 
     # Issue SSO session cookie
@@ -367,9 +397,10 @@ def signup_2fa_enable(data: Enable2FASchema, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid 2FA code. Please try again.")
 
     user.is_2fa_enabled = True
+    user.is_2fa_activated = True
     db.commit()
 
-    return {"message": "2FA enabled successfully", "is_2fa_enabled": True}
+    return {"message": "2FA enabled successfully", "is_2fa_enabled": True, "is_2fa_activated": True}
 
 # --- CUSTOM EMAIL SIGNUP ENDPOINTS ---
 
@@ -431,12 +462,12 @@ def signup_complete(data: SignupCompleteSchema, db: Session = Depends(get_db)):
         email=email_clean,
         name=data.name,
         hashed_password=get_password_hash(data.password),
-        role="normal-user",  # Default role
+        roles="normal-user",
         role_id=role_obj.id if role_obj else None,
-        is_admin=False,
         is_active=True,
         provider="local",
         is_2fa_enabled=False,
+        is_2fa_activated=False,
         totp_secret=secret
     )
     db.add(user)
@@ -456,7 +487,7 @@ def signup_complete(data: SignupCompleteSchema, db: Session = Depends(get_db)):
             "id": user.id,
             "email": user.email,
             "name": user.name,
-            "role": user.role,
+            "roles": user.roles_list,
             "is_admin": user.is_admin,
             "is_2fa_enabled": False
         },
@@ -478,6 +509,7 @@ def signup_enable_2fa(data: Signup2FAEnableSchema, db: Session = Depends(get_db)
         raise HTTPException(status_code=400, detail="Invalid verification code")
 
     user.is_2fa_enabled = True
+    user.is_2fa_activated = True
     db.commit()
     return {"message": "2FA successfully activated for your account!"}
 
@@ -499,6 +531,7 @@ def get_profile(db: Session = Depends(get_db), current_user=Depends(verify_token
         "email": user.email,
         "name": user.name,
         "picture": user.picture,
+        "roles": user.roles_list,
         "role": user.role,
         "role_label": role_obj.label if role_obj else user.role,
         "is_admin": user.is_admin,
@@ -506,6 +539,7 @@ def get_profile(db: Session = Depends(get_db), current_user=Depends(verify_token
         "provider": user.provider,
         "has_password": bool(user.hashed_password),
         "is_2fa_enabled": user.is_2fa_enabled,
+        "is_2fa_activated": user.is_2fa_activated,
         "enforce_2fa_all": enforce_2fa,
         "has_2fa_configured": bool(user.totp_secret),
         "created_at": user.created_at
@@ -586,8 +620,15 @@ def password_reset_request_otp(db: Session = Depends(get_db), current_user=Depen
 
     return {"message": f"Verification code sent to your email ({user.email})."}
 
-@router.post("/user/password-reset/confirm-otp")
-def password_reset_confirm_otp(data: ResetPasswordConfirmSchema, db: Session = Depends(get_db), current_user=Depends(verify_token)):
+@router.post("/user/password-reset/verify-otp")
+def password_reset_verify_otp(data: VerifyOtpSchema, db: Session = Depends(get_db), current_user=Depends(verify_token)):
+    """Validate the email OTP and mark it as verified for this session.
+
+    Lets the management UI prompt-check the 6-digit code on its own step (so an
+    invalid code is caught immediately) before the final set-new-password step sets
+    the new password. The OTP itself is NOT consumed here — only a short-lived
+    `otp_verified` flag is recorded, so a user can re-try the code if needed.
+    """
     user = db.query(User).filter(User.id == current_user["sub"]).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -596,11 +637,28 @@ def password_reset_confirm_otp(data: ResetPasswordConfirmSchema, db: Session = D
     if not cached or str(cached.get("otp")) != data.otp_code.strip():
         raise HTTPException(status_code=400, detail="Invalid or expired email verification code.")
 
+    set_cache(f"otp_verified:{user.id}", {"verified": True}, ttl=600)
+    return {"verified": True, "message": "Verification code is correct."}
+
+@router.post("/user/password-reset/set-new-password")
+def password_reset_set_new_password(data: SetNewPasswordSchema, db: Session = Depends(get_db), current_user=Depends(verify_token)):
+    user = db.query(User).filter(User.id == current_user["sub"]).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # The OTP was already validated server-side in the verify-otp step, which
+    # set a short-lived `otp_verified` flag. We do NOT re-read otp_code here —
+    # that removes the redundant second verification the user had to go through.
+    verified = get_cache(f"otp_verified:{user.id}")
+    if not verified or not verified.get("verified"):
+        raise HTTPException(status_code=400, detail="Verification not completed. Please verify your code again.")
+
     user.hashed_password = get_password_hash(data.new_password)
     db.commit()
 
     delete_cache(f"reset_password_otp:{user.id}")
     delete_cache(f"old_pwd_verified:{user.id}")
+    delete_cache(f"otp_verified:{user.id}")
 
     return {"message": "Password reset successfully!"}
 
@@ -661,6 +719,7 @@ def verify_and_enable_2fa(data: Verify2FASchema, db: Session = Depends(get_db), 
         raise HTTPException(status_code=400, detail="Invalid verification code")
     
     user.is_2fa_enabled = True
+    user.is_2fa_activated = True
     db.commit()
     return {"message": "2FA successfully enabled"}
 
@@ -695,6 +754,7 @@ def disable_2fa_confirm_otp(data: Disable2FAConfirmSchema, db: Session = Depends
         raise HTTPException(status_code=400, detail="Invalid or expired verification code.")
 
     user.is_2fa_enabled = False
+    user.is_2fa_activated = False
     user.totp_secret = None
     db.commit()
 
@@ -737,7 +797,8 @@ def user_2fa_reset_confirm_otp(data: Reset2FAConfirmSchema, db: Session = Depend
     new_qr = generate_qr_code_data_uri(totp_uri)
 
     user.totp_secret = new_secret
-    user.is_2fa_enabled = False # User can verify and enable with new QR code
+    user.is_2fa_enabled = True
+    user.is_2fa_activated = False # User can verify and enable with new QR code
     db.commit()
 
     delete_cache(f"reset_2fa_otp:{user.id}")
@@ -759,11 +820,11 @@ def list_roles(db: Session = Depends(get_db), admin=Depends(verify_admin)):
     result = []
     for r in roles:
         active_count = db.query(User).filter(
-            or_(User.role == r.name, User.role_id == r.id),
+            or_(User.roles.contains(r.name), User.role_id == r.id),
             User.is_active == True
         ).count()
         total_count = db.query(User).filter(
-            or_(User.role == r.name, User.role_id == r.id)
+            or_(User.roles.contains(r.name), User.role_id == r.id)
         ).count()
         result.append({
             "id": r.id,
@@ -817,7 +878,7 @@ def delete_role(role_id: int, db: Session = Depends(get_db), admin=Depends(verif
     
     # Disable all users assigned to this role when deleting
     associated_users = db.query(User).filter(
-        or_(User.role == role.name, User.role_id == role.id)
+        or_(User.roles.contains(role.name), User.role_id == role.id)
     ).all()
     disabled_count = len(associated_users)
     for u in associated_users:
@@ -847,7 +908,7 @@ def list_users(
             )
         )
     if role:
-        query = query.filter(User.role == role)
+        query = query.filter(User.roles.contains(role))
     if is_active is not None:
         query = query.filter(User.is_active == is_active)
 
@@ -860,10 +921,12 @@ def list_users(
             "picture": u.picture,
             "role": u.role,
             "role_id": u.role_id,
+            "roles": u.roles_list,
             "is_admin": u.is_admin,
             "is_active": u.is_active,
             "provider": u.provider,
             "is_2fa_enabled": u.is_2fa_enabled,
+            "is_2fa_activated": u.is_2fa_activated,
             "has_2fa_configured": bool(u.totp_secret),
             "created_at": u.created_at
         }
@@ -875,18 +938,18 @@ def create_user(data: UserCreateSchema, db: Session = Depends(get_db), admin=Dep
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(status_code=400, detail="User already exists")
     
-    role_obj = db.query(Role).filter(Role.name == data.role).first()
+    role_obj = db.query(Role).filter(Role.name == data.roles.split(",")[0]).first()
     role_id = role_obj.id if role_obj else None
 
     user = User(
         email=data.email,
         name=data.name,
         hashed_password=get_password_hash(data.password),
-        role=data.role,
+        roles=data.roles,
         role_id=role_id,
-        is_admin=data.is_admin or (data.role == "admin"),
         is_active=True,
         is_2fa_enabled=data.is_2fa_enabled,
+        is_2fa_activated=data.is_2fa_activated,
         provider="local"
     )
     db.add(user)
@@ -900,36 +963,72 @@ def update_user(user_id: str, data: UserUpdateSchema, db: Session = Depends(get_
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
+    if data.roles is not None:
+        user.roles = data.roles
+        role_obj = db.query(Role).filter(Role.name == data.roles.split(",")[0]).first()
+        user.role_id = role_obj.id if role_obj else None
     if data.name is not None:
         user.name = data.name
     if data.picture is not None:
         user.picture = data.picture
-    if data.role is not None:
-        user.role = data.role
-        role_obj = db.query(Role).filter(Role.name == data.role).first()
-        user.role_id = role_obj.id if role_obj else None
-        if data.role == "admin":
-            user.is_admin = True
     if data.is_active is not None:
         user.is_active = data.is_active
-    if data.is_admin is not None:
-        user.is_admin = data.is_admin
     if data.is_2fa_enabled is not None:
         user.is_2fa_enabled = data.is_2fa_enabled
+    if data.is_2fa_activated is not None:
+        user.is_2fa_activated = data.is_2fa_activated
     if data.reset_2fa:
-        user.is_2fa_enabled = False
+        # Reset 2FA: clear secret and deactivate, but keep is_2fa_enabled=true
+        # so user is still required to set up 2FA again
+        user.is_2fa_activated = False
         user.totp_secret = None
+        # is_2fa_enabled remains unchanged (stays true)
+    
+    if data.disable_2fa_temporary:
+        # Temporarily disable 2FA: only disable the requirement
+        user.is_2fa_enabled = False
+        # is_2fa_activated and totp_secret remain unchanged
+    
+    if data.disable_2fa_permanent:
+        # Permanently disable 2FA: disable requirement, deactivate, and clear secret
+        user.is_2fa_enabled = False
+        user.is_2fa_activated = False
+        user.totp_secret = None
+    
+    if data.enable_2fa:
+        # Enable 2FA requirement (but not activated yet - user needs to set up)
+        user.is_2fa_enabled = True
+        user.is_2fa_activated = False
+        # totp_secret remains unchanged (will be generated on next login if needed)
+    
     if data.password:
         user.hashed_password = get_password_hash(data.password)
     
     db.commit()
     return {"message": "User updated"}
 
+@router.delete("/admin/users/{user_id}")
+def delete_user(user_id: str, db: Session = Depends(get_db), admin=Depends(verify_admin)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    db.delete(user)
+    db.commit()
+    return {"message": "User deleted successfully", "user_id": user_id}
+
 # Client Application Management
 @router.get("/admin/clients")
 def list_clients(db: Session = Depends(get_db), admin=Depends(verify_admin)):
     clients = db.query(ClientApp).all()
     return clients
+
+@router.get("/admin/clients/{client_id}")
+def get_client(client_id: str, db: Session = Depends(get_db), admin=Depends(verify_admin)):
+    client = db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client application not found")
+    return client
 
 @router.post("/admin/clients")
 def create_client(data: ClientCreateSchema, db: Session = Depends(get_db), admin=Depends(verify_admin)):
@@ -941,9 +1040,28 @@ def create_client(data: ClientCreateSchema, db: Session = Depends(get_db), admin
         client_secret=client_secret,
         client_name=data.client_name,
         redirect_uris=data.redirect_uris,
-        is_sso_enabled=data.is_sso_enabled
+        is_sso_enabled=data.is_sso_enabled,
+        post_logout_redirect_uris=data.post_logout_redirect_uris,
+        backchannel_logout_uris=data.backchannel_logout_uris,
+        backchannel_logout_enabled=data.backchannel_logout_enabled
     )
     db.add(client)
+    db.commit()
+    db.refresh(client)
+    return client
+
+@router.put("/admin/clients/{client_id}")
+def update_client(client_id: str, data: ClientUpdateSchema, db: Session = Depends(get_db), admin=Depends(verify_admin)):
+    client = db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
+    if not client:
+        raise HTTPException(status_code=404, detail="Client application not found")
+    
+    # Use exclude_unset so that fields explicitly set to null (e.g. the
+    # frontend sends "post_logout_redirect_uris": null to clear the value)
+    # are applied, while fields omitted from the request are left untouched.
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(client, field, value)
+    
     db.commit()
     db.refresh(client)
     return client
@@ -956,6 +1074,17 @@ def delete_client(client_id: str, db: Session = Depends(get_db), admin=Depends(v
     db.delete(client)
     db.commit()
     return {"message": "Client deleted"}
+
+# ---------------------------------------------------------------------------
+# Global server settings (read-only) — consumed by the management UI to
+# conditionally enable / disable per-client logout options.
+# ---------------------------------------------------------------------------
+@router.get("/admin/global-settings")
+def get_global_settings(admin=Depends(verify_admin)):
+    return {
+        "backchannel_logout_enabled": settings.BACKCHANNEL_LOGOUT_ENABLED,
+        "post_logout_redirect_url": settings.POST_LOGOUT_REDIRECT_URL or settings.LOGOUT_REDIRECT_URL or "",
+    }
 
 # Google Setting & Global 2FA Management
 @router.get("/admin/google-settings")
@@ -995,16 +1124,30 @@ def update_google_settings(data: GoogleSettingSchema, db: Session = Depends(get_
     if data.enforce_2fa_all is not None:
         setting.enforce_2fa_all = data.enforce_2fa_all
 
-    # If we're turning the global 2FA enforcement ON, flip every user's
-    # is_2fa_enabled flag to True. Users who haven't configured a TOTP
-    # secret yet will see "Setup" status in the user table and will be
-    # routed through the 2FA setup page on next login.
+    # If we're turning the global 2FA enforcement ON, set is_2fa_enabled=True for all users
+    # who don't already have it enabled
     users_updated = 0
     if data.enforce_2fa_all is True and not previous_enforce:
+        # Only set is_2fa_enabled=True, is_2fa_activated remains as-is
         users_updated = (
             db.query(User)
               .filter(User.is_2fa_enabled == False)  # noqa: E712
-              .update({User.is_2fa_enabled: True}, synchronize_session=False)
+              .update({
+                  User.is_2fa_enabled: True
+                  # is_2fa_activated remains unchanged
+              }, synchronize_session=False)
+        )
+        db.commit()
+    elif data.enforce_2fa_all is False and previous_enforce:
+        # Disabling global enforcement: temporarily disable 2FA for all users
+        # by setting is_2fa_enabled=False (but keep is_2fa_activated and totp_secret)
+        users_updated = (
+            db.query(User)
+              .filter(User.is_2fa_enabled == True)  # noqa: E712
+              .update({
+                  User.is_2fa_enabled: False
+                  # is_2fa_activated and totp_secret remain unchanged
+              }, synchronize_session=False)
         )
         db.commit()
     else:

@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{# Public home / landing page for auth.dilipdangoriya.com.np
+Used for Google Auth Platform "Application home page" verification. #}
+
+{% block title %}IAM Auth Server — Single sign-on for dilipdangoriya.com.np{% endblock %}
+
+{% block content %}
+{% set apps = [
+("dilipdangoriya.com.np", "Main site", "Personal homepage and project hub."),
+("calender.dilipdangoriya.com.np", "Calendar", "Scheduling and reminders."),
+("live.dilipdangoriya.com.np", "Live", "Real-time presence and streaming."),
+("meroshare.dilipdangoriya.com.np", "MeroShare", "Share and portfolio management."),
+("play.dilipdangoriya.com.np", "Play", "Media and interactive experiences."),
+] %}
+
+{% include "public/_navbar.html" %}
+
+<main class="public-main">
+  <!-- ─────────── HERO ─────────── -->
+  <section class="public-hero">
+    <span class="public-eyebrow">Identity &amp; access management</span>
+    <h1>One account. Every app on <span class="grad-text">dilipdangoriya.com.np</span></h1>
+    <p class="public-lede">
+      The IAM Auth Server is the central sign-in for the
+      <code>dilipdangoriya.com.np</code> family of applications. Sign in once with your
+      Google account or a local password, and jump between the calendar, live dashboards,
+      portfolio tools, and every other internal app without re-entering your credentials.
+    </p>
+    <div class="public-hero-cta">
+      <a class="btn-cta" href="/authorize">Sign in to your apps →</a>
+      <a class="btn-ghost" href="#how-it-works">See how it works</a>
+    </div>
+  </section>
+
+  <!-- ─────────── FEATURES ─────────── -->
+  <section id="features" class="public-section">
+    <h2 class="public-h2">What's inside the auth server</h2>
+    <p class="public-sub">
+      Everything a small set of internal apps needs to recognise the same person —
+      without each app building its own login system.
+    </p>
+
+    <div class="public-grid">
+      <article class="public-card">
+        <div class="public-card-icon">🔐</div>
+        <h3>Single sign-on (OIDC)</h3>
+        <p>OpenID Connect at <code>auth.dilipdangoriya.com.np</code>. Every connected app redirects
+          here to authenticate, then returns the user with a signed identity token.</p>
+      </article>
+      <article class="public-card">
+        <div class="public-card-icon">🪪</div>
+        <h3>Google social sign-in</h3>
+        <p>Sign in with Google. We only request your <strong>name</strong>, <strong>email</strong> and
+          <strong>profile picture</strong> — nothing more.
+        </p>
+      </article>
+      <article class="public-card">
+        <div class="public-card-icon">🔑</div>
+        <h3>Local password &amp; 2FA</h3>
+        <p>Prefer not to use Google? Create a local account with email + password and
+          optionally enable TOTP-based two-factor authentication.</p>
+      </article>
+      <article class="public-card">
+        <div class="public-card-icon">🛡️</div>
+        <h3>Centralised 2FA management</h3>
+        <p>Forgotten your authenticator, lost your phone, or want to reset your 2FA secret?
+          Reset it from the Profile page with an email-confirmed security code.</p>
+      </article>
+      <article class="public-card">
+        <div class="public-card-icon">📨</div>
+        <h3>Email-verified password reset</h3>
+        <p>Forgot your password? Request a one-time reset link sent to your email and
+          choose a new one in a couple of clicks.</p>
+      </article>
+      <article class="public-card">
+        <div class="public-card-icon">🧩</div>
+        <h3>OpenID for new apps</h3>
+        <p>Add a new internal app by registering it as a client. It immediately gets
+          sign-in, profile, and 2FA — no extra work for the app.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ─────────── ARCHITECTURE / HOW IT WORKS ─────────── -->
+  <section id="how-it-works" class="public-section">
+    <h2 class="public-h2">How the pieces fit together</h2>
+    <p class="public-sub">
+      The auth server sits in the middle. Users come from Google or a local
+      password; apps trust the signed token issued by the auth server.
+    </p>
+
+    <figure class="public-diagram">
+      <svg viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Architecture diagram">
+        <defs>
+          <linearGradient id="hubGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#10b981" />
+            <stop offset="1" stop-color="#6366f1" />
+          </linearGradient>
+          <linearGradient id="googleGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#4285F4" />
+            <stop offset="1" stop-color="#34A853" />
+          </linearGradient>
+          <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+            <feOffset dy="3" />
+            <feComponentTransfer>
+              <feFuncA type="linear" slope="0.35" />
+            </feComponentTransfer>
+            <feMerge>
+              <feMergeNode />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
+        <!-- Connection lines from hub to apps (loop-generated) + to Google -->
+        <g stroke="#475569" stroke-width="1.5" stroke-dasharray="5 5" fill="none">
+          {% for subdomain, label, desc in apps %}
+          {% set cx = 90 + loop.index0 * 140 %}
+          <path d="M 360 180 C {{ cx }} 200, {{ cx }} 250, {{ cx }} 290" />
+          {% endfor %}
+          <path d="M 360 180 C 280 130, 230 70, 190 50" />
+        </g>
+
+        <!-- Google (top left) -->
+        <g filter="url(#softShadow)">
+          <rect x="60" y="20" width="160" height="60" rx="14" fill="url(#googleGrad)" />
+          <text x="140" y="48" text-anchor="middle" fill="#fff" font-family="Inter, system-ui, sans-serif"
+            font-size="14" font-weight="600">Google</text>
+          <text x="140" y="66" text-anchor="middle" fill="rgba(255,255,255,0.85)"
+            font-family="Inter, system-ui, sans-serif" font-size="10">name · email · picture</text>
+        </g>
+
+        <!-- Central Auth Server hub -->
+        <g filter="url(#softShadow)">
+          <circle cx="360" cy="180" r="78" fill="url(#hubGrad)" />
+          <text x="360" y="172" text-anchor="middle" fill="#fff" font-family="Inter, system-ui, sans-serif"
+            font-size="18" font-weight="700">IAM Auth</text>
+          <text x="360" y="194" text-anchor="middle" fill="rgba(255,255,255,0.92)"
+            font-family="Inter, system-ui, sans-serif" font-size="11">auth.dilipdangoriya.com.np</text>
+          <text x="360" y="210" text-anchor="middle" fill="rgba(255,255,255,0.85)"
+            font-family="Inter, system-ui, sans-serif" font-size="10">OIDC · 2FA · SSO</text>
+        </g>
+
+        <!-- Apps (bottom row) — positions computed from loop index for 5 evenly-spaced boxes -->
+        <g font-family="Inter, system-ui, sans-serif" font-size="11" fill="#e2e8f0">
+          {% for subdomain, label, desc in apps %}
+          {% set cx = 90 + loop.index0 * 140 %}
+          <g>
+            <rect x="{{ cx - 60 }}" y="290" width="120" height="50" rx="10" fill="#0f172a" stroke="#334155" />
+            <text x="{{ cx }}" y="308" text-anchor="middle" font-weight="600" fill="#f8fafc">{{ label }}</text>
+            <text x="{{ cx }}" y="324" text-anchor="middle" fill="#94a3b8" font-size="9">{{ subdomain }}</text>
+          </g>
+          {% endfor %}
+        </g>
+      </svg>
+      <figcaption>
+        Users authenticate once at the auth server. Every connected app
+        receives a signed OIDC identity token and trusts the user.
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ─────────── CONNECTED APPS ─────────── -->
+  <section id="apps" class="public-section">
+    <h2 class="public-h2">Apps currently using the auth server</h2>
+    <p class="public-sub">
+      Single sign-on is live across these internal subdomains of
+      <code>dilipdangoriya.com.np</code>
+    </p>
+    <ul class="public-app-list">
+      {% for subdomain, label, desc in apps %}
+      <li>
+        <strong><a class="public-app-link" href="https://{{ subdomain }}" target="_blank" rel="noopener noreferrer">{{ label }}</a></strong>
+        <code><a class="public-app-link" href="https://{{ subdomain }}" target="_blank" rel="noopener noreferrer">{{ subdomain }}</a></code>
+        <span>{{ desc }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="public-sub" style="margin-top: 1rem;">
+      Building a new internal tool? Register it as a client in the
+      <a href="/authorize">auth server</a> and it gets sign-in for free.
+    </p>
+  </section>
+
+  <!-- ─────────── CALL TO ACTION ─────────── -->
+  <section class="public-cta-band">
+    <h2>Ready to sign in?</h2>
+    <p>Use your Google account or a local password. Two-factor authentication is supported
+      and recommended for every account.</p>
+    <a class="btn-cta" href="/authorize">Sign in →</a>
+  </section>
+</main>
+
+{% include "public/_footer.html" %}
+{% endblock %}

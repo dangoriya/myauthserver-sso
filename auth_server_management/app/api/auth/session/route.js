@@ -9,11 +9,15 @@ import { NextResponse } from 'next/server';
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { access_token, refresh_token, expires_in } = body;
+    const { access_token, refresh_token, id_token, expires_in } = body;
 
     const response = NextResponse.json({ success: true });
     const maxAge = expires_in || 86400 * 7;
-    const isSecure = process.env.NODE_ENV === 'production';
+    // Safari strictly drops cookies marked Secure if received over HTTP (e.g. http://localhost:3005).
+    // Only set Secure if explicitly configured or running under HTTPS.
+    const isSecure =
+      process.env.COOKIE_SECURE === 'true' ||
+      (process.env.NEXT_PUBLIC_MANAGEMENT_URL || '').startsWith('https://');
 
     if (access_token) {
       response.cookies.set('mgmt_access_token', access_token, {
@@ -27,6 +31,16 @@ export async function POST(request) {
 
     if (refresh_token) {
       response.cookies.set('mgmt_refresh_token', refresh_token, {
+        httpOnly: true,
+        secure: isSecure,
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 86400 * 7,
+      });
+    }
+
+    if (id_token) {
+      response.cookies.set('mgmt_id_token', id_token, {
         httpOnly: true,
         secure: isSecure,
         sameSite: 'lax',
@@ -49,6 +63,7 @@ export async function DELETE() {
   const response = NextResponse.json({ success: true });
   response.cookies.set('mgmt_access_token', '', { maxAge: 0, path: '/' });
   response.cookies.set('mgmt_refresh_token', '', { maxAge: 0, path: '/' });
+  response.cookies.set('mgmt_id_token', '', { maxAge: 0, path: '/' });
   // Also clear legacy mgmt_user cookie in case it exists from older sessions
   response.cookies.set('mgmt_user', '', { maxAge: 0, path: '/' });
   return response;

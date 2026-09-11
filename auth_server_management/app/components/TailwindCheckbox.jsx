@@ -11,8 +11,9 @@
  *   description - optional string
  *   color       - 'indigo' (default) | 'emerald' | 'amber' | 'rose'
  *   id          - optional string
+ *   disabled    - optional boolean
  */
-export default function TailwindCheckbox({ checked, onChange, label, description, color = 'indigo', id }) {
+export default function TailwindCheckbox({ checked, onChange, label, description, color = 'indigo', id, disabled = false }) {
   const boxColor = {
     indigo:  'bg-indigo-500 border-indigo-500',
     emerald: 'bg-emerald-500 border-emerald-500',
@@ -21,13 +22,14 @@ export default function TailwindCheckbox({ checked, onChange, label, description
   }[color] || 'bg-indigo-500 border-indigo-500';
 
   return (
-    <label className="relative flex items-center gap-2.5 cursor-pointer select-none group" htmlFor={id}>
+    <label className={`relative flex items-center gap-2.5 ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} select-none group`} htmlFor={id}>
       {/* Hidden native input for form compatibility */}
       <input
         id={id}
         type="checkbox"
         checked={checked}
         onChange={onChange}
+        disabled={disabled}
         className="sr-only"
       />
 

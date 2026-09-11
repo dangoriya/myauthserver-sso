@@ -50,7 +50,7 @@ export default function DashboardPage() {
       <h1 className="text-3xl font-bold bg-gradient-to-r from-emerald-400 via-indigo-300 to-purple-400 bg-clip-text text-transparent mb-2">
         IAM System Overview
       </h1>
-      <p className="text-slate-400 mb-8">Identity & Access Control Center - Status Overview</p>
+      <p className="text-slate-400 mb-8">Identity & Access Management - Status Overview</p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
         <div className="p-6 rounded-3xl bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-900 border border-emerald-500/20 shadow-xl">

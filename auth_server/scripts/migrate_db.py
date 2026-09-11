@@ -43,9 +43,9 @@ def run_migrations(reset: bool = False):
         if guest_role:
             # Reassign any guest users to normal-user
             normal_role = role_map.get("normal-user")
-            guest_users = db.query(User).filter(User.role == "guest").all()
+            guest_users = db.query(User).filter(User.roles.contains("guest")).all()
             for u in guest_users:
-                u.role = "normal-user"
+                u.roles = "normal-user"
                 if normal_role:
                     u.role_id = normal_role.id
             db.delete(guest_role)
@@ -59,9 +59,8 @@ def run_migrations(reset: bool = False):
                 email="admin@example.com",
                 name="System Administrator",
                 hashed_password=get_password_hash("admin123"),
-                role="admin",
+                roles="admin",
                 role_id=admin_role.id if admin_role else None,
-                is_admin=True,
                 is_active=True,
                 provider="local"
             )
@@ -82,37 +81,17 @@ def run_migrations(reset: bool = False):
             db.add(g_setting)
             print("  ✅ Google Setting initialized.")
             
-        # Seed Default Client SSO Applications
-        default_client = db.query(ClientApp).filter(ClientApp.client_id == "test_client_id_1").first()
-        test_client_secret = os.environ.get("CLIENT_SECRET", "test_client_secret_1")
-        if not default_client:
-            default_client = ClientApp(
-                client_id="test_client_id_1",
-                client_secret=test_client_secret,
-                client_name="Test App 1",
-                redirect_uris="http://localhost:3001/callback",
-                post_logout_redirect_uris="http://localhost:3001/logged-out",
-                backchannel_logout_uris="",
-                backchannel_logout_enabled=False,
-                allowed_grant_types="authorization_code",
-                is_sso_enabled=True
-            )
-            db.add(default_client)
-            print(f"  ✅ Default Client App created: test_client_id_1 (secret from env)")
 
         # Seed Auth Server Management Client App
         management_redirect_uri = f"{settings.MANAGEMENT_URL.rstrip('/')}/auth/callback"
-        mgmt_post_logout_uri = (
-            f"{settings.MANAGEMENT_URL.rstrip('/')}/logged-out,"
-            f"{settings.MANAGEMENT_URL.rstrip('/')}"
-        )
+        mgmt_post_logout_uri = f"{settings.MANAGEMENT_URL.rstrip('/')}/logged-out"
         mgmt_client = db.query(ClientApp).filter(ClientApp.client_id == "auth_management_app").first()
         if not mgmt_client:
             mgmt_client = ClientApp(
                 client_id="auth_management_app",
                 client_secret="auth_management_secret",
                 client_name="Auth Server Management",
-                redirect_uris=f"{management_redirect_uri},{settings.MANAGEMENT_URL.rstrip('/')}",
+                redirect_uris=management_redirect_uri,
                 post_logout_redirect_uris=mgmt_post_logout_uri,
                 backchannel_logout_uris="",
                 backchannel_logout_enabled=False,
@@ -122,10 +101,11 @@ def run_migrations(reset: bool = False):
             db.add(mgmt_client)
             print(f"  ✅ Auth Server Management App registered: auth_management_app ({management_redirect_uri})")
         else:
+            mgmt_client.redirect_uris = management_redirect_uri
             mgmt_client.post_logout_redirect_uris = mgmt_post_logout_uri
             mgmt_client.backchannel_logout_enabled = False
             db.commit()
-            print(f"  🔧 Updated Auth Server Management App with OIDC logout config")
+            print(f"  🔧 Updated Auth Server Management App ({management_redirect_uri})")
 
         db.commit()
         print("🎉 [MIGRATION] Database schema & master data setup completed successfully!")
