@@ -1233,25 +1233,129 @@ def oauth_introspect(
     return {"active": False}
 
 
-@router.get("/oauth/session/active")
-def oauth_session_active(request: Request):
-    """Lightweight ping used by client apps. 200 if the bearer token is
-    a valid (not expired) access token; 401 otherwise. Client apps call
-    this periodically (and on window focus) to detect a centralized
-    logout: once the user's refresh tokens have been revoked, every new
-    access token refresh will 400 and the app will start seeing 401s
-    here."""
+@router.api_route("/oauth/session/active", methods=["GET", "POST"])
+async def oauth_session_active(request: Request, db: Session = Depends(get_db)):
+    """Real-time SSO session status endpoint.
+
+    Accepts either an access_token or id_token via:
+      - Authorization: Bearer <token>
+      - Query parameter: ?token=... or ?access_token=... or ?id_token=...
+      - POST body: { token: "..." } or form data
+
+    Validates:
+      1. Cryptographic RS256 signature and expiration
+      2. User existence and active status in DB
+      3. Real-time SSO session and refresh token presence in Redis
+
+    Returns 200 with session/user details if active; 401 otherwise.
+    """
     from auth_utils import decode_token
 
+    raw_token = None
     auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Bearer token required")
-    payload = decode_token(auth_header.split(" ", 1)[1])
+    if auth_header.startswith("Bearer "):
+        raw_token = auth_header.split(" ", 1)[1].strip()
+
+    if not raw_token:
+        query_params = request.query_params
+        raw_token = (
+            query_params.get("token")
+            or query_params.get("access_token")
+            or query_params.get("id_token")
+        )
+
+    if not raw_token and request.method == "POST":
+        try:
+            content_type = request.headers.get("content-type", "")
+            if "application/json" in content_type:
+                body_json = await request.json()
+                raw_token = (
+                    body_json.get("token")
+                    or body_json.get("access_token")
+                    or body_json.get("id_token")
+                )
+            else:
+                form_data = await request.form()
+                raw_token = (
+                    form_data.get("token")
+                    or form_data.get("access_token")
+                    or form_data.get("id_token")
+                )
+        except Exception:
+            pass
+
+    if not raw_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Token required (Bearer header, token/access_token/id_token parameter)",
+        )
+
+    payload = decode_token(raw_token, verify_exp=True)
     if not payload:
         raise HTTPException(status_code=401, detail="Token invalid or expired")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token: missing sub claim")
+
+    # 1. Verify user status in Database
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    if not user.is_active:
+        raise HTTPException(status_code=401, detail="User account is deactivated")
+
+    # 2. Verify real-time SSO session state in Redis
+    sid = payload.get("sid")
+    is_session_active = False
+
+    # Check direct sso_session if sid is in token claims
+    if sid:
+        sess = get_cache(f"sso_session:{sid}")
+        if sess and isinstance(sess, dict) and sess.get("user_id") == user_id:
+            is_session_active = True
+
+    # Check active refresh token index for user
+    from redis_client import redis_client
+    if not is_session_active and redis_client is not None:
+        try:
+            refresh_count = redis_client.scard(f"user_refresh:{user_id}")
+            if refresh_count and refresh_count > 0:
+                is_session_active = True
+        except Exception:
+            pass
+
+    # Scan active sso_session keys for user as fallback
+    if not is_session_active and redis_client is not None:
+        try:
+            for key in redis_client.scan_iter("sso_session:*"):
+                val = get_cache(key)
+                if isinstance(val, dict) and val.get("user_id") == user_id:
+                    is_session_active = True
+                    break
+        except Exception:
+            pass
+
+    if not is_session_active:
+        raise HTTPException(
+            status_code=401, detail="SSO session has expired or was terminated"
+        )
+
+    token_type = (
+        "id_token"
+        if ("auth_time" in payload or "nonce" in payload or "scope" not in payload)
+        else "access_token"
+    )
+
     return {
         "active": True,
-        "sub": payload.get("sub"),
+        "sub": user.id,
+        "email": user.email,
+        "name": user.name or user.email,
+        "roles": user.roles_list,
+        "is_admin": user.is_admin,
         "client_id": payload.get("client_id") or payload.get("aud"),
+        "sid": sid,
         "exp": payload.get("exp"),
+        "token_type": token_type,
     }

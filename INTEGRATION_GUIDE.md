@@ -228,21 +228,28 @@ curl -X POST http://localhost:8005/token \
 
 Refresh tokens are single-use (rotated per RFC 6749 §6). The old refresh token is invalidated on each use.
 
-### Detecting Centralized Logout
+### Detecting Centralized Logout (Real-Time SSO Session Check)
 
-When a user logs out of the SSO session (via `/logout` or admin action), all their refresh tokens are revoked. Client apps detect this within 15 minutes when their next token refresh fails.
+When a user logs out of the SSO session (via `/logout` or admin action), all their refresh tokens and Redis session entries are revoked. Client apps detect this within 15 minutes when their next token refresh fails.
 
-For faster detection, poll the session-active endpoint:
+For faster detection, poll the real-time session-active endpoint:
 
 ```bash
+# Via Bearer header (supports access_token or id_token)
 curl http://localhost:8005/oauth/session/active \
-  -H "Authorization: Bearer <access_token>"
+  -H "Authorization: Bearer <access_token_or_id_token>"
+
+# Or via query parameter:
+curl "http://localhost:8005/oauth/session/active?token=<access_token_or_id_token>"
 ```
 
-- `200` — session still active, token valid
-- `401` — token invalid/expired or user logged out (refresh will fail)
+- **Supported Tokens**: Accepts either `access_token` or `id_token` (via `Authorization: Bearer <token>`, `?token=...`, `?access_token=...`, or `?id_token=...`).
+- **Validation**: Verifies cryptographic signature, user active status in the database, and real-time SSO session / refresh-token presence in Redis.
+- **Status Responses**:
+  - `200 OK` — SSO session is active, user is valid, returns user details (`sub`, `email`, `name`, `roles`, `token_type`, `exp`, `sid`).
+  - `401 Unauthorized` — Token invalid/expired or central SSO session terminated.
 
-Call on `window.focus` and every ~30s for near-real-time SSO logout detection.
+Call on `window.focus` and periodically (e.g., every 30s) for real-time SSO logout detection.
 
 ## 3. JWKS / Token Verification
 
