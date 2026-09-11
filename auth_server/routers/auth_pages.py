@@ -497,6 +497,7 @@ async def signup_step4(
 
     user.totp_secret = secret
     user.is_2fa_enabled = True
+    user.is_2fa_activated = True
     db.commit()
     db.refresh(user)
 

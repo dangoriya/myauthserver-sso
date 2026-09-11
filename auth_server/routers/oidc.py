@@ -213,13 +213,20 @@ def authorize_get(
         if user and user.is_active:
             g = db.query(GoogleSetting).filter(GoogleSetting.id == 1).first()
             enforce_2fa = bool(g and g.enforce_2fa_all)
-            if user.is_2fa_enabled or enforce_2fa:
-                if not user.totp_secret:
+            if user.is_2fa_enabled:
+                # If 2FA is not activated (setup not completed), redirect to setup page
+                if not user.is_2fa_activated:
+                    # Ensure user has a TOTP secret (generate if missing)
+                    if not user.totp_secret:
+                        user.totp_secret = generate_totp_secret()
+                        user.is_2fa_activated = False
+                        db.commit()
                     return RedirectResponse(
                         f"/2fa-setup-page?user_id={user.id}&client_id={client_id}"
                         f"&redirect_uri={urllib.parse.quote(redirect_uri or '')}&state={urllib.parse.quote(state or '')}",
                         status_code=303,
                     )
+                # 2FA is activated, redirect to verify page
                 return RedirectResponse(
                     f"/2fa-verify-page?user_id={user.id}&client_id={client_id}"
                     f"&redirect_uri={urllib.parse.quote(redirect_uri or '')}&state={urllib.parse.quote(state or '')}",
@@ -338,13 +345,20 @@ async def login_submit(
     g = db.query(GoogleSetting).filter(GoogleSetting.id == 1).first()
     enforce_2fa = bool(g and g.enforce_2fa_all)
 
-    if user.is_2fa_enabled or enforce_2fa:
-        if not user.totp_secret:
+    if user.is_2fa_enabled:
+        # If 2FA is not activated (setup not completed), redirect to setup page
+        if not user.is_2fa_activated:
+            # Ensure user has a TOTP secret (generate if missing)
+            if not user.totp_secret:
+                user.totp_secret = generate_totp_secret()
+                user.is_2fa_activated = False
+                db.commit()
             return RedirectResponse(
                 f"/2fa-setup-page?user_id={user.id}&client_id={client_id}"
                 f"&redirect_uri={urllib.parse.quote(redirect_uri or '')}&state={urllib.parse.quote(state or '')}",
                 status_code=303,
             )
+        # 2FA is activated, redirect to verify page
         return RedirectResponse(
             f"/2fa-verify-page?user_id={user.id}&client_id={client_id}"
             f"&redirect_uri={urllib.parse.quote(redirect_uri or '')}&state={urllib.parse.quote(state or '')}",
@@ -476,8 +490,10 @@ async def two_fa_stepup_submit(
             errors={"totp_code": "Invalid verification code. Please try again."},
         )
 
-    if is_setup == "true" and not user.is_2fa_enabled:
+    if is_setup == "true":
+        # User is completing the 2FA setup process - mark as enabled and activated
         user.is_2fa_enabled = True
+        user.is_2fa_activated = True
         db.commit()
         db.refresh(user)
         audit("2fa_enabled", request, user_id=user.id, email=user.email, client_id=client_id)
@@ -601,13 +617,20 @@ async def google_auth_callback(
         audit("signup_via_google", request, user_id=user.id, email=user.email)
 
     enforce_2fa = bool(g.enforce_2fa_all)
-    if user.is_2fa_enabled or enforce_2fa:
-        if not user.totp_secret:
+    if user.is_2fa_enabled:
+        # If 2FA is not activated (setup not completed), redirect to setup page
+        if not user.is_2fa_activated:
+            # Ensure user has a TOTP secret (generate if missing)
+            if not user.totp_secret:
+                user.totp_secret = generate_totp_secret()
+                user.is_2fa_activated = False
+                db.commit()
             return RedirectResponse(
                 f"/2fa-setup-page?user_id={user.id}&client_id={target_client_id}"
                 f"&redirect_uri={urllib.parse.quote(target_redirect_uri)}&state={urllib.parse.quote(app_state)}",
                 status_code=303,
             )
+        # 2FA is activated, redirect to verify page
         return RedirectResponse(
             f"/2fa-verify-page?user_id={user.id}&client_id={target_client_id}"
             f"&redirect_uri={urllib.parse.quote(target_redirect_uri)}&state={urllib.parse.quote(app_state)}",
@@ -753,6 +776,7 @@ def userinfo_endpoint(request: Request, db: Session = Depends(get_db)):
         "roles": user.roles_list,
         "is_admin": user.is_admin,
         "is_2fa_enabled": user.is_2fa_enabled,
+        "is_2fa_activated": user.is_2fa_activated,
     }
 
 

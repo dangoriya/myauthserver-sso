@@ -140,6 +140,7 @@ class UserCreateSchema(BaseModel):
     password: str
     roles: str = "normal-user"
     is_2fa_enabled: bool = False
+    is_2fa_activated: bool = False
 
 class UserUpdateSchema(BaseModel):
     name: Optional[str] = None
@@ -147,8 +148,12 @@ class UserUpdateSchema(BaseModel):
     roles: Optional[str] = None
     is_active: Optional[bool] = None
     is_2fa_enabled: Optional[bool] = None
+    is_2fa_activated: Optional[bool] = None
     password: Optional[str] = None
     reset_2fa: Optional[bool] = False
+    disable_2fa_temporary: Optional[bool] = False
+    disable_2fa_permanent: Optional[bool] = False
+    enable_2fa: Optional[bool] = False
 
 class RoleCreateSchema(BaseModel):
     name: str
@@ -222,12 +227,18 @@ def iam_login(data: LoginSchema, db: Session = Depends(get_db)):
     g_setting = db.query(GoogleSetting).filter(GoogleSetting.id == 1).first()
     enforce_2fa = g_setting.enforce_2fa_all if g_setting else False
 
-    requires_2fa = user.is_2fa_enabled or enforce_2fa
+    requires_2fa = user.is_2fa_enabled
     if requires_2fa:
-        if not user.totp_secret:
-            secret = generate_totp_secret()
-            user.totp_secret = secret
-            db.commit()
+        # If 2FA is not activated (setup not completed), redirect to setup page
+        if not user.is_2fa_activated:
+            # Generate or reuse existing TOTP secret
+            if not user.totp_secret:
+                secret = generate_totp_secret()
+                user.totp_secret = secret
+                db.commit()
+            else:
+                secret = user.totp_secret
+            
             uri = get_totp_uri(secret, user.email)
             qr_uri = generate_qr_code_data_uri(uri)
             return {
@@ -238,6 +249,7 @@ def iam_login(data: LoginSchema, db: Session = Depends(get_db)):
                 "message": "2FA setup required"
             }
         else:
+            # 2FA is activated, redirect to verify page
             return {
                 "requires_2fa_verify": True,
                 "user_id": user.id,
@@ -255,6 +267,7 @@ def iam_login(data: LoginSchema, db: Session = Depends(get_db)):
             "roles": user.roles_list,
             "is_admin": user.is_admin,
             "is_2fa_enabled": user.is_2fa_enabled,
+            "is_2fa_activated": user.is_2fa_activated,
             "provider": user.provider
         }
     }
@@ -273,6 +286,9 @@ def iam_login_2fa_verify(data: IAMLogin2FAVerifySchema, db: Session = Depends(ge
     if not verify_totp_code(user.totp_secret, data.totp_code):
         raise HTTPException(status_code=400, detail="Invalid 2FA verification code")
 
+    user.is_2fa_activated = True
+    db.commit()
+
     token = create_admin_token(user.id, user.email, role=user.role)
     return {
         "access_token": token,
@@ -284,6 +300,7 @@ def iam_login_2fa_verify(data: IAMLogin2FAVerifySchema, db: Session = Depends(ge
             "roles": user.roles_list,
             "is_admin": user.is_admin,
             "is_2fa_enabled": user.is_2fa_enabled,
+            "is_2fa_activated": user.is_2fa_activated,
             "provider": user.provider
         }
     }
@@ -312,6 +329,7 @@ def oidc_2fa_stepup(data: OIDCStepupSchema, db: Session = Depends(get_db)):
 
     if data.is_setup:
         user.is_2fa_enabled = True
+        user.is_2fa_activated = True
         db.commit()
 
     # Issue SSO session cookie
@@ -379,9 +397,10 @@ def signup_2fa_enable(data: Enable2FASchema, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid 2FA code. Please try again.")
 
     user.is_2fa_enabled = True
+    user.is_2fa_activated = True
     db.commit()
 
-    return {"message": "2FA enabled successfully", "is_2fa_enabled": True}
+    return {"message": "2FA enabled successfully", "is_2fa_enabled": True, "is_2fa_activated": True}
 
 # --- CUSTOM EMAIL SIGNUP ENDPOINTS ---
 
@@ -448,6 +467,7 @@ def signup_complete(data: SignupCompleteSchema, db: Session = Depends(get_db)):
         is_active=True,
         provider="local",
         is_2fa_enabled=False,
+        is_2fa_activated=False,
         totp_secret=secret
     )
     db.add(user)
@@ -489,6 +509,7 @@ def signup_enable_2fa(data: Signup2FAEnableSchema, db: Session = Depends(get_db)
         raise HTTPException(status_code=400, detail="Invalid verification code")
 
     user.is_2fa_enabled = True
+    user.is_2fa_activated = True
     db.commit()
     return {"message": "2FA successfully activated for your account!"}
 
@@ -518,6 +539,7 @@ def get_profile(db: Session = Depends(get_db), current_user=Depends(verify_token
         "provider": user.provider,
         "has_password": bool(user.hashed_password),
         "is_2fa_enabled": user.is_2fa_enabled,
+        "is_2fa_activated": user.is_2fa_activated,
         "enforce_2fa_all": enforce_2fa,
         "has_2fa_configured": bool(user.totp_secret),
         "created_at": user.created_at
@@ -697,6 +719,7 @@ def verify_and_enable_2fa(data: Verify2FASchema, db: Session = Depends(get_db), 
         raise HTTPException(status_code=400, detail="Invalid verification code")
     
     user.is_2fa_enabled = True
+    user.is_2fa_activated = True
     db.commit()
     return {"message": "2FA successfully enabled"}
 
@@ -731,6 +754,7 @@ def disable_2fa_confirm_otp(data: Disable2FAConfirmSchema, db: Session = Depends
         raise HTTPException(status_code=400, detail="Invalid or expired verification code.")
 
     user.is_2fa_enabled = False
+    user.is_2fa_activated = False
     user.totp_secret = None
     db.commit()
 
@@ -773,7 +797,8 @@ def user_2fa_reset_confirm_otp(data: Reset2FAConfirmSchema, db: Session = Depend
     new_qr = generate_qr_code_data_uri(totp_uri)
 
     user.totp_secret = new_secret
-    user.is_2fa_enabled = False # User can verify and enable with new QR code
+    user.is_2fa_enabled = True
+    user.is_2fa_activated = False # User can verify and enable with new QR code
     db.commit()
 
     delete_cache(f"reset_2fa_otp:{user.id}")
@@ -901,6 +926,7 @@ def list_users(
             "is_active": u.is_active,
             "provider": u.provider,
             "is_2fa_enabled": u.is_2fa_enabled,
+            "is_2fa_activated": u.is_2fa_activated,
             "has_2fa_configured": bool(u.totp_secret),
             "created_at": u.created_at
         }
@@ -923,6 +949,7 @@ def create_user(data: UserCreateSchema, db: Session = Depends(get_db), admin=Dep
         role_id=role_id,
         is_active=True,
         is_2fa_enabled=data.is_2fa_enabled,
+        is_2fa_activated=data.is_2fa_activated,
         provider="local"
     )
     db.add(user)
@@ -948,9 +975,32 @@ def update_user(user_id: str, data: UserUpdateSchema, db: Session = Depends(get_
         user.is_active = data.is_active
     if data.is_2fa_enabled is not None:
         user.is_2fa_enabled = data.is_2fa_enabled
+    if data.is_2fa_activated is not None:
+        user.is_2fa_activated = data.is_2fa_activated
     if data.reset_2fa:
-        user.is_2fa_enabled = False
+        # Reset 2FA: clear secret and deactivate, but keep is_2fa_enabled=true
+        # so user is still required to set up 2FA again
+        user.is_2fa_activated = False
         user.totp_secret = None
+        # is_2fa_enabled remains unchanged (stays true)
+    
+    if data.disable_2fa_temporary:
+        # Temporarily disable 2FA: only disable the requirement
+        user.is_2fa_enabled = False
+        # is_2fa_activated and totp_secret remain unchanged
+    
+    if data.disable_2fa_permanent:
+        # Permanently disable 2FA: disable requirement, deactivate, and clear secret
+        user.is_2fa_enabled = False
+        user.is_2fa_activated = False
+        user.totp_secret = None
+    
+    if data.enable_2fa:
+        # Enable 2FA requirement (but not activated yet - user needs to set up)
+        user.is_2fa_enabled = True
+        user.is_2fa_activated = False
+        # totp_secret remains unchanged (will be generated on next login if needed)
+    
     if data.password:
         user.hashed_password = get_password_hash(data.password)
     
@@ -1074,16 +1124,30 @@ def update_google_settings(data: GoogleSettingSchema, db: Session = Depends(get_
     if data.enforce_2fa_all is not None:
         setting.enforce_2fa_all = data.enforce_2fa_all
 
-    # If we're turning the global 2FA enforcement ON, flip every user's
-    # is_2fa_enabled flag to True. Users who haven't configured a TOTP
-    # secret yet will see "Setup" status in the user table and will be
-    # routed through the 2FA setup page on next login.
+    # If we're turning the global 2FA enforcement ON, set is_2fa_enabled=True for all users
+    # who don't already have it enabled
     users_updated = 0
     if data.enforce_2fa_all is True and not previous_enforce:
+        # Only set is_2fa_enabled=True, is_2fa_activated remains as-is
         users_updated = (
             db.query(User)
               .filter(User.is_2fa_enabled == False)  # noqa: E712
-              .update({User.is_2fa_enabled: True}, synchronize_session=False)
+              .update({
+                  User.is_2fa_enabled: True
+                  # is_2fa_activated remains unchanged
+              }, synchronize_session=False)
+        )
+        db.commit()
+    elif data.enforce_2fa_all is False and previous_enforce:
+        # Disabling global enforcement: temporarily disable 2FA for all users
+        # by setting is_2fa_enabled=False (but keep is_2fa_activated and totp_secret)
+        users_updated = (
+            db.query(User)
+              .filter(User.is_2fa_enabled == True)  # noqa: E712
+              .update({
+                  User.is_2fa_enabled: False
+                  # is_2fa_activated and totp_secret remain unchanged
+              }, synchronize_session=False)
         )
         db.commit()
     else:

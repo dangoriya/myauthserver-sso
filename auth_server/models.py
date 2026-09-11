@@ -46,6 +46,7 @@ class User(Base):
 
     provider = Column(String, default="local") # "local" or "google"
     is_2fa_enabled = Column(Boolean, default=False)
+    is_2fa_activated = Column(Boolean, default=False)
     totp_secret = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
