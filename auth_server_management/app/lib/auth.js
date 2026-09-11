@@ -113,7 +113,7 @@ export async function centralLogout({ redirectTo } = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
-    }).catch(() => {});
+    }).catch(() => { });
   } catch {
     // Ignore error
   }
@@ -123,16 +123,13 @@ export async function centralLogout({ redirectTo } = {}) {
   if (typeof window !== 'undefined') {
     try {
       localStorage.removeItem('mgmt_user');
-    } catch {}
+    } catch { }
   }
 
   if (typeof window !== 'undefined') {
-    if (redirectTo) {
-      window.location.href = redirectTo;
-    } else {
-      // Use the dynamic server-side logout route that reads runtime AUTH_SERVER_URL
-      // It reads mgmt_id_token cookie and passes it as id_token_hint
-      window.location.href = '/api/auth/logout';
-    }
+    const target = redirectTo
+      ? `/api/auth/logout?redirectTo=${encodeURIComponent(redirectTo)}`
+      : '/api/auth/logout';
+    window.location.href = target;
   }
 }

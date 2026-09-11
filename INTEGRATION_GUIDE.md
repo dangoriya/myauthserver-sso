@@ -263,21 +263,27 @@ Verify tokens by:
 
 ### RP-Initiated Logout (Browser Redirect)
 
-Redirect the browser to:
+**⚠️ SECURITY UPDATE:** The `/logout` endpoint now **requires POST** and **compulsory `id_token_hint`** for security (CSRF protection).
+
+Send a **POST request** with form data to:
 
 ```
-GET http://localhost:8005/logout?
-  id_token_hint=<id_token_from_step_3>&
-  post_logout_redirect_uri=http://localhost:3001/logged-out&
-  state=OPTIONAL_STATE
-  &client_id=client_a1b2c3d4e5f6   # optional alternative to id_token_hint
+POST http://localhost:8005/logout
+Content-Type: application/x-www-form-urlencoded
+
+id_token_hint=<id_token_from_step_3>&
+post_logout_redirect_uri=http://localhost:3001/logged-out&
+state=OPTIONAL_STATE&
+client_id=client_a1b2c3d4e5f6  # optional fallback if id_token lacks aud
 ```
 
-**`id_token_hint` is now optional.** You can identify the client using either:
-- **`id_token_hint`** — standard OIDC; identifies user (`sub`) and client (`aud`)
-- **`client_id` query parameter** — alternative for clients without an id_token
+**`id_token_hint` is now REQUIRED.** The signed JWT provides:
+- **CSRF protection** — cannot be forged by attackers
+- **User identification** — `sub` claim identifies the user
+- **Client identification** — `aud` or `client_id` claim identifies the client
+- **Integrity verification** — JWT signature is validated
 
-If both are omitted and no SSO session cookie exists, the request will fail.
+If `id_token_hint` is missing or invalid, the request will be **rejected with 401 Unauthorized**.
 
 The `post_logout_redirect_uri` is validated against the client's registered `post_logout_redirect_uris`:
 
@@ -290,12 +296,29 @@ The `post_logout_redirect_uri` is validated against the client's registered `pos
 **Global fallback chain:** `POST_LOGOUT_REDIRECT_URL` → `LOGOUT_REDIRECT_URL` → `AUTH_SERVER_URL`
 
 The auth server will:
-1. Verify the id_token signature (expiration not required) — if provided
-2. Identify the client from `id_token_hint.aud` or `client_id` query parameter
-3. Validate `post_logout_redirect_uri` against the client's registered URIs (fallback on mismatch)
-4. Terminate the central SSO session
-5. Revoke all refresh tokens for the user (forces re-auth on all clients)
-6. Redirect the browser to the validated `post_logout_redirect_uri` or the global fallback
+1. ✅ **Verify the id_token_hint JWT signature** (expiration not required)
+2. ✅ **Validate client is registered** in the database
+3. ✅ Identify the client from `id_token_hint.aud` or `client_id` parameter
+4. ✅ Terminate the central SSO session
+5. ✅ Revoke all refresh tokens for the user (forces re-auth on all clients)
+6. ✅ Redirect the browser to the validated `post_logout_redirect_uri` or the global fallback
+
+**JavaScript Example:**
+```javascript
+const idToken = localStorage.getItem('id_token');
+const formData = new URLSearchParams();
+formData.append('id_token_hint', idToken);
+formData.append('post_logout_redirect_uri', 'https://myapp.com/logged-out');
+
+fetch('https://auth.yourdomain.com/logout', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: formData.toString(),
+  credentials: 'include'
+}).then(() => {
+  window.location.href = '/logged-out';
+});
+```
 
 Register `post_logout_redirect_uris` during client creation (or via the management UI / `PUT /api/v1/admin/clients/{client_id}`).
 
@@ -424,7 +447,7 @@ http://localhost:8005/jwks.json
 http://localhost:8005/authorize
 http://localhost:8005/token
 http://localhost:8005/userinfo
-http://localhost:8005/logout
+POST http://localhost:8005/logout  # Changed to POST for CSRF protection
 http://localhost:8005/oauth/session/active
 
 # Management API
@@ -441,15 +464,30 @@ POST http://localhost:8005/api/v1/sso/logout
 - The access token contains user profile (`email`, `name`, `roles`) — you may not need `/userinfo`
 
 ### Logout Integration
+**⚠️ Important:** The `/logout` endpoint now **requires POST** with `id_token_hint` for security.
+
 ```javascript
-// Option 1: With id_token_hint (standard OIDC)
-window.location.href = `https://auth.example.com/logout?id_token_hint=${idToken}&post_logout_redirect_uri=https://myapp.com/logged-out`;
+// POST with id_token_hint (required)
+const formData = new URLSearchParams();
+formData.append('id_token_hint', idToken);
+formData.append('post_logout_redirect_uri', 'https://myapp.com/logged-out');
 
-// Option 2: With client_id (simpler, no id_token needed)
-window.location.href = `https://auth.example.com/logout?client_id=my_client_id&post_logout_redirect_uri=https://myapp.com/logged-out`;
+fetch('https://auth.example.com/logout', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: formData.toString(),
+  credentials: 'include'
+}).then(response => {
+  // Browser will follow redirect automatically
+  window.location.href = response.url;
+});
 
-// Both work; invalid post_logout_redirect_uri safely falls back to global URL
+// Alternative: Via server-side proxy (recommended for SPAs)
+// Your backend POSTs to auth server, then redirects the browser
+window.location.href = '/api/auth/logout';
 ```
+
+**Note:** `id_token_hint` is now **REQUIRED**. Client must have stored the `id_token` from the OIDC login response.
 
 ### Silent Re-auth (SSO)
 If the user has a valid `sso_session` cookie and your client has `is_sso_enabled=true`, the `/authorize` endpoint will immediately redirect back with a code — no login form shown.
@@ -458,5 +496,5 @@ If the user has a valid `sso_session` cookie and your client has `is_sso_enabled
 | Endpoint | Error Response Format |
 |---|---|
 | `/token` | `{ "detail": "invalid_grant" }` (400) |
-| `/logout` | HTML error page (400) or redirect to global fallback |
+| `/logout` | `{ "detail": "Invalid or tampered id_token_hint" }` (401) or `{ "detail": "Unknown client_id" }` (401) |
 | `/userinfo` | `{ "detail": "Invalid access token" }` (401) |

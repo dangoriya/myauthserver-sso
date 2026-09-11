@@ -87,18 +87,27 @@ def _resolve_client(db: Session, client_id: Optional[str], redirect_uri: Optiona
         return None, ("invalid_request", "Missing mandatory client_id parameter.")
     client = db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
     if not client:
-        return None, ("unknown_client",
-                      f"No client application is registered with client_id <code>{client_id}</code>.")
+        return None, (
+            "unknown_client",
+            f"No client application is registered with client_id <code>{client_id}</code>.",
+        )
     if redirect_uri and not _validate_redirect_uri(client, redirect_uri):
-        return None, ("invalid_redirect_uri",
-                      f"The redirect URI <code>{redirect_uri}</code> is not registered for client <code>{client_id}</code>.")
+        return None, (
+            "invalid_redirect_uri",
+            f"The redirect URI <code>{redirect_uri}</code> is not registered for client <code>{client_id}</code>.",
+        )
     return client, None
 
 
-def _issue_auth_code_and_session(user: User, client_id: str, redirect_uri: str,
-                                 state: str, request: Request,
-                                 code_challenge: Optional[str] = None,
-                                 code_challenge_method: Optional[str] = None) -> tuple[Response, str, str]:
+def _issue_auth_code_and_session(
+    user: User,
+    client_id: str,
+    redirect_uri: str,
+    state: str,
+    request: Request,
+    code_challenge: Optional[str] = None,
+    code_challenge_method: Optional[str] = None,
+) -> tuple[Response, str, str]:
     """Create an SSO session + an auth code, return a redirect Response, the
     code URL, and the OIDC session id (sid) used by back-channel logout.
     """
@@ -125,14 +134,22 @@ def _issue_auth_code_and_session(user: User, client_id: str, redirect_uri: str,
         target += f"&state={urllib.parse.quote(state)}"
     resp = RedirectResponse(target, status_code=303)
     set_sso_cookie(resp, sso_session_id, max_age=86400)
-    audit("auth_code_issued", request, user_id=user.id, email=user.email, client_id=client_id)
+    audit(
+        "auth_code_issued",
+        request,
+        user_id=user.id,
+        email=user.email,
+        client_id=client_id,
+    )
     return resp, target, sid
 
 
 def _google_href(client_id: str, redirect_uri: str, state: str) -> str:
-    return (f"/auth/google?client_id={urllib.parse.quote(client_id)}"
-            f"&redirect_uri={urllib.parse.quote(redirect_uri or '')}"
-            f"&state={urllib.parse.quote(state or '')}")
+    return (
+        f"/auth/google?client_id={urllib.parse.quote(client_id)}"
+        f"&redirect_uri={urllib.parse.quote(redirect_uri or '')}"
+        f"&state={urllib.parse.quote(state or '')}"
+    )
 
 
 def _get_google_enabled(db: Session) -> bool:
@@ -161,8 +178,20 @@ def openid_configuration():
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256", "plain"],
         "token_endpoint_auth_methods_supported": ["client_secret_post"],
-         "claims_supported": ["sub", "iss", "aud", "exp", "iat", "auth_time", "email",
-                              "name", "picture", "roles", "is_admin", "sid"],
+        "claims_supported": [
+            "sub",
+            "iss",
+            "aud",
+            "exp",
+            "iat",
+            "auth_time",
+            "email",
+            "name",
+            "picture",
+            "roles",
+            "is_admin",
+            "sid",
+        ],
         "backchannel_logout_supported": settings.BACKCHANNEL_LOGOUT_ENABLED,
         "backchannel_logout_session_supported": settings.BACKCHANNEL_LOGOUT_ENABLED,
     }
@@ -171,6 +200,7 @@ def openid_configuration():
 @router.get("/jwks.json")
 def jwks():
     from security import get_jwks
+
     return get_jwks()
 
 
@@ -195,18 +225,24 @@ def authorize_get(
     # registered client avoids 400 "redirect URI not registered" errors.
     if not client_id:
         client_id = "auth_management_app"
-        redirect_uri = redirect_uri or f"{settings.MANAGEMENT_URL.rstrip('/')}/auth/callback"
+        redirect_uri = (
+            redirect_uri or f"{settings.MANAGEMENT_URL.rstrip('/')}/auth/callback"
+        )
 
     client, err = _resolve_client(db, client_id, redirect_uri)
     if err:
         title, msg = err
-        return render_template(request, "errors/error.html", status_code=400, title=title, message=msg)
+        return render_template(
+            request, "errors/error.html", status_code=400, title=title, message=msg
+        )
 
     client_name = client.client_name if client else "IAM Central Auth"
 
     # Skip login form if user already has a valid SSO session
     sso_session_id = request.cookies.get("sso_session")
-    session_data = get_cache(f"sso_session:{sso_session_id}") if sso_session_id else None
+    session_data = (
+        get_cache(f"sso_session:{sso_session_id}") if sso_session_id else None
+    )
 
     if session_data and client and client.is_sso_enabled:
         user = db.query(User).filter(User.id == session_data["user_id"]).first()
@@ -232,7 +268,9 @@ def authorize_get(
                     f"&redirect_uri={urllib.parse.quote(redirect_uri or '')}&state={urllib.parse.quote(state or '')}",
                     status_code=303,
                 )
-            resp, _, _ = _issue_auth_code_and_session(user, client_id, redirect_uri or "", state or "", request)
+            resp, _, _ = _issue_auth_code_and_session(
+                user, client_id, redirect_uri or "", state or "", request
+            )
             return resp
 
     # Build context for the login template
@@ -248,7 +286,11 @@ def authorize_get(
         "signup_href": signup_href,
         "management_url": settings.MANAGEMENT_URL,
         "google_enabled": _get_google_enabled(db),
-        "google_href": _google_href(client_id, redirect_uri or "", state or "") if _get_google_enabled(db) else "",
+        "google_href": (
+            _google_href(client_id, redirect_uri or "", state or "")
+            if _get_google_enabled(db)
+            else ""
+        ),
         "form": {},
         "errors": {},
     }
@@ -283,63 +325,100 @@ async def login_submit(
     if errors:
         client, _ = _resolve_client(db, client_id, redirect_uri)
         return render_template(
-            request, "auth/login.html", status_code=400,
-            client_id=client_id, client_name=client.client_name if client else "IAM",
-            redirect_uri=redirect_uri, state=state,
+            request,
+            "auth/login.html",
+            status_code=400,
+            client_id=client_id,
+            client_name=client.client_name if client else "IAM",
+            redirect_uri=redirect_uri,
+            state=state,
             form={"email": email},
             errors=errors,
             signup_href=f"/signup?redirect_uri={urllib.parse.quote(redirect_uri or '')}",
             management_url=settings.MANAGEMENT_URL,
             google_enabled=_get_google_enabled(db),
-            google_href=_google_href(client_id, redirect_uri, state) if _get_google_enabled(db) else "",
+            google_href=(
+                _google_href(client_id, redirect_uri, state)
+                if _get_google_enabled(db)
+                else ""
+            ),
         )
 
     try:
         rate_limit_login(request, email)
     except Exception:
         return render_template(
-            request, "auth/login.html", status_code=429,
-            client_id=client_id, client_name="IAM", redirect_uri=redirect_uri, state=state,
+            request,
+            "auth/login.html",
+            status_code=429,
+            client_id=client_id,
+            client_name="IAM",
+            redirect_uri=redirect_uri,
+            state=state,
             form={"email": email},
             errors={"email": "Too many sign-in attempts. Please wait a few minutes."},
             signup_href=f"/signup?redirect_uri={urllib.parse.quote(redirect_uri or '')}",
             management_url=settings.MANAGEMENT_URL,
             google_enabled=_get_google_enabled(db),
-            google_href=_google_href(client_id, redirect_uri, state) if _get_google_enabled(db) else "",
+            google_href=(
+                _google_href(client_id, redirect_uri, state)
+                if _get_google_enabled(db)
+                else ""
+            ),
         )
 
     client, err = _resolve_client(db, client_id, redirect_uri)
     if err:
         title, msg = err
-        return render_template(request, "errors/error.html", status_code=400, title=title, message=msg)
+        return render_template(
+            request, "errors/error.html", status_code=400, title=title, message=msg
+        )
 
     user = db.query(User).filter(User.email == email.lower()).first()
-    valid = bool(user) and verify_password(password, user.hashed_password if user else "")
+    valid = bool(user) and verify_password(
+        password, user.hashed_password if user else ""
+    )
 
     if not user or not valid:
         audit("login_failed", request, email=email, client_id=client_id)
         return render_template(
-            request, "auth/login.html", status_code=401,
-            client_id=client_id, client_name=client.client_name if client else "IAM",
-            redirect_uri=redirect_uri, state=state,
+            request,
+            "auth/login.html",
+            status_code=401,
+            client_id=client_id,
+            client_name=client.client_name if client else "IAM",
+            redirect_uri=redirect_uri,
+            state=state,
             form={"email": email},
             errors={"password": "Invalid email or password. Please try again."},
             signup_href=f"/signup?redirect_uri={urllib.parse.quote(redirect_uri or '')}",
             management_url=settings.MANAGEMENT_URL,
             google_enabled=_get_google_enabled(db),
-            google_href=_google_href(client_id, redirect_uri, state) if _get_google_enabled(db) else "",
+            google_href=(
+                _google_href(client_id, redirect_uri, state)
+                if _get_google_enabled(db)
+                else ""
+            ),
         )
     if not user.is_active:
         return render_template(
-            request, "auth/login.html", status_code=403,
-            client_id=client_id, client_name=client.client_name if client else "IAM",
-            redirect_uri=redirect_uri, state=state,
+            request,
+            "auth/login.html",
+            status_code=403,
+            client_id=client_id,
+            client_name=client.client_name if client else "IAM",
+            redirect_uri=redirect_uri,
+            state=state,
             form={"email": email},
             errors={"email": "Your account has been disabled. Please contact support."},
             signup_href=f"/signup?redirect_uri={urllib.parse.quote(redirect_uri or '')}",
             management_url=settings.MANAGEMENT_URL,
             google_enabled=_get_google_enabled(db),
-            google_href=_google_href(client_id, redirect_uri, state) if _get_google_enabled(db) else "",
+            google_href=(
+                _google_href(client_id, redirect_uri, state)
+                if _get_google_enabled(db)
+                else ""
+            ),
         )
 
     g = db.query(GoogleSetting).filter(GoogleSetting.id == 1).first()
@@ -365,8 +444,12 @@ async def login_submit(
             status_code=303,
         )
 
-    audit("login_success", request, user_id=user.id, email=user.email, client_id=client_id)
-    resp, _, _ = _issue_auth_code_and_session(user, client_id, redirect_uri or "", state or "", request)
+    audit(
+        "login_success", request, user_id=user.id, email=user.email, client_id=client_id
+    )
+    resp, _, _ = _issue_auth_code_and_session(
+        user, client_id, redirect_uri or "", state or "", request
+    )
     return resp
 
 
@@ -385,8 +468,13 @@ def two_fa_setup_page(
 ):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        return render_template(request, "errors/error.html", status_code=404,
-                               title="User not found", message="The 2FA session has expired. Please sign in again.")
+        return render_template(
+            request,
+            "errors/error.html",
+            status_code=404,
+            title="User not found",
+            message="The 2FA session has expired. Please sign in again.",
+        )
 
     if not user.totp_secret:
         user.totp_secret = generate_totp_secret()
@@ -395,8 +483,11 @@ def two_fa_setup_page(
 
     uri = get_totp_uri(user.totp_secret, user.email)
     return render_template(
-        request, "auth/2fa_setup.html",
-        user_id=user.id, client_id=client_id, redirect_uri=redirect_uri,
+        request,
+        "auth/2fa_setup.html",
+        user_id=user.id,
+        client_id=client_id,
+        redirect_uri=redirect_uri,
         redirect_uri_enc=urllib.parse.quote(redirect_uri or ""),
         state=state,
         qr_code=generate_qr_code_data_uri(uri),
@@ -417,8 +508,11 @@ def two_fa_verify_page(
     state: str = "",
 ):
     return render_template(
-        request, "auth/2fa_verify.html",
-        user_id=user_id, client_id=client_id, redirect_uri=redirect_uri,
+        request,
+        "auth/2fa_verify.html",
+        user_id=user_id,
+        client_id=client_id,
+        redirect_uri=redirect_uri,
         redirect_uri_enc=urllib.parse.quote(redirect_uri or ""),
         state=state,
     )
@@ -447,44 +541,83 @@ async def two_fa_stepup_submit(
         user = db.query(User).filter(User.id == user_id).first()
         if is_setup == "true" and user:
             return render_template(
-                request, "auth/2fa_setup.html", status_code=400,
-                user_id=user.id, client_id=client_id, redirect_uri=redirect_uri,
+                request,
+                "auth/2fa_setup.html",
+                status_code=400,
+                user_id=user.id,
+                client_id=client_id,
+                redirect_uri=redirect_uri,
                 redirect_uri_enc=urllib.parse.quote(redirect_uri or ""),
                 state=state,
-                qr_code=generate_qr_code_data_uri(get_totp_uri(user.totp_secret, user.email)) if user.totp_secret else "",
+                qr_code=(
+                    generate_qr_code_data_uri(
+                        get_totp_uri(user.totp_secret, user.email)
+                    )
+                    if user.totp_secret
+                    else ""
+                ),
                 totp_secret=user.totp_secret or "",
-                errors={"totp_code": "Please enter the 6-digit code from your authenticator app."},
+                errors={
+                    "totp_code": "Please enter the 6-digit code from your authenticator app."
+                },
             )
         return render_template(
-            request, "auth/2fa_verify.html", status_code=400,
-            user_id=user_id, client_id=client_id, redirect_uri=redirect_uri,
+            request,
+            "auth/2fa_verify.html",
+            status_code=400,
+            user_id=user_id,
+            client_id=client_id,
+            redirect_uri=redirect_uri,
             redirect_uri_enc=urllib.parse.quote(redirect_uri or ""),
             state=state,
-            errors={"totp_code": "Please enter the 6-digit code from your authenticator app."},
+            errors={
+                "totp_code": "Please enter the 6-digit code from your authenticator app."
+            },
         )
 
     rate_limit_2fa(request, user_id)
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user or not user.totp_secret:
-        return render_template(request, "errors/error.html", status_code=400,
-                               title="Invalid state", message="2FA session has expired. Please sign in again.")
+        return render_template(
+            request,
+            "errors/error.html",
+            status_code=400,
+            title="Invalid state",
+            message="2FA session has expired. Please sign in again.",
+        )
 
     if not verify_totp_code(user.totp_secret, totp_code):
-        audit("2fa_failed", request, user_id=user.id, email=user.email, client_id=client_id)
+        audit(
+            "2fa_failed",
+            request,
+            user_id=user.id,
+            email=user.email,
+            client_id=client_id,
+        )
         if is_setup == "true":
             return render_template(
-                request, "auth/2fa_setup.html", status_code=401,
-                user_id=user.id, client_id=client_id, redirect_uri=redirect_uri,
+                request,
+                "auth/2fa_setup.html",
+                status_code=401,
+                user_id=user.id,
+                client_id=client_id,
+                redirect_uri=redirect_uri,
                 redirect_uri_enc=urllib.parse.quote(redirect_uri or ""),
                 state=state,
-                qr_code=generate_qr_code_data_uri(get_totp_uri(user.totp_secret, user.email)),
+                qr_code=generate_qr_code_data_uri(
+                    get_totp_uri(user.totp_secret, user.email)
+                ),
                 totp_secret=user.totp_secret,
                 errors={"totp_code": "Invalid verification code. Please try again."},
             )
         return render_template(
-            request, "auth/2fa_verify.html", status_code=401,
-            user_id=user.id, client_id=client_id, redirect_uri=redirect_uri,
+            request,
+            "auth/2fa_verify.html",
+            status_code=401,
+            user_id=user.id,
+            client_id=client_id,
+            redirect_uri=redirect_uri,
             redirect_uri_enc=urllib.parse.quote(redirect_uri or ""),
             state=state,
             errors={"totp_code": "Invalid verification code. Please try again."},
@@ -496,10 +629,20 @@ async def two_fa_stepup_submit(
         user.is_2fa_activated = True
         db.commit()
         db.refresh(user)
-        audit("2fa_enabled", request, user_id=user.id, email=user.email, client_id=client_id)
+        audit(
+            "2fa_enabled",
+            request,
+            user_id=user.id,
+            email=user.email,
+            client_id=client_id,
+        )
 
-    audit("2fa_success", request, user_id=user.id, email=user.email, client_id=client_id)
-    resp, _, _ = _issue_auth_code_and_session(user, client_id, redirect_uri, state, request)
+    audit(
+        "2fa_success", request, user_id=user.id, email=user.email, client_id=client_id
+    )
+    resp, _, _ = _issue_auth_code_and_session(
+        user, client_id, redirect_uri, state, request
+    )
     return resp
 
 
@@ -523,14 +666,17 @@ def google_auth_init(
     oauth_state = f"{target_client_id}|{target_redirect_uri}|{state}"
     params = {
         "client_id": g.client_id,
-        "redirect_uri": g.redirect_uri or f"{settings.AUTH_SERVER_URL}/auth/google/callback",
+        "redirect_uri": g.redirect_uri
+        or f"{settings.AUTH_SERVER_URL}/auth/google/callback",
         "response_type": "code",
         "scope": "openid email profile",
         "state": oauth_state,
         "access_type": "offline",
         "prompt": "consent",
     }
-    return RedirectResponse(f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}")
+    return RedirectResponse(
+        f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
+    )
 
 
 @router.get("/auth/google/callback")
@@ -549,13 +695,15 @@ async def google_auth_callback(
     # code back to the management app's postback URL.
     # ------------------------------------------------------------------
     if state and state.startswith("__test__|"):
-        postback = state[len("__test__|"):]
+        postback = state[len("__test__|") :]
         # Validate the postback URL — only allow http(s) to prevent open
         # redirects. The management page URL is what the operator just
         # clicked from, so it's trusted.
         if not postback.startswith(("http://", "https://")):
             return render_template(
-                request, "errors/error.html", status_code=400,
+                request,
+                "errors/error.html",
+                status_code=400,
                 title="Invalid test postback URL",
                 message=f"Test postback URL is invalid: {postback}",
             )
@@ -567,8 +715,16 @@ async def google_auth_callback(
 
     g = db.query(GoogleSetting).filter(GoogleSetting.id == 1).first()
     state_parts = state.split("|") if state else []
-    target_client_id = state_parts[0] if len(state_parts) > 0 and state_parts[0] else "auth_management_app"
-    target_redirect_uri = state_parts[1] if len(state_parts) > 1 and state_parts[1] else settings.CENTRAL_DASHBOARD_URL
+    target_client_id = (
+        state_parts[0]
+        if len(state_parts) > 0 and state_parts[0]
+        else "auth_management_app"
+    )
+    target_redirect_uri = (
+        state_parts[1]
+        if len(state_parts) > 1 and state_parts[1]
+        else settings.CENTRAL_DASHBOARD_URL
+    )
     app_state = state_parts[2] if len(state_parts) > 2 else ""
 
     if not g or not g.is_enabled or not g.client_id or not g.client_secret:
@@ -595,7 +751,9 @@ async def google_auth_callback(
             headers={"Authorization": f"Bearer {token_data['access_token']}"},
         )
         if userinfo_res.status_code != 200:
-            raise HTTPException(status_code=400, detail="Failed to fetch Google user info")
+            raise HTTPException(
+                status_code=400, detail="Failed to fetch Google user info"
+            )
         google_user = userinfo_res.json()
 
     google_email = (google_user.get("email") or "").lower()
@@ -609,11 +767,17 @@ async def google_auth_callback(
     if not user:
         normal_role = db.query(Role).filter(Role.name == "normal-user").first()
         user = User(
-            email=google_email, name=google_name, picture=google_picture,
-            roles="normal-user", role_id=normal_role.id if normal_role else None,
-            is_active=True, provider="google",
+            email=google_email,
+            name=google_name,
+            picture=google_picture,
+            roles="normal-user",
+            role_id=normal_role.id if normal_role else None,
+            is_active=True,
+            provider="google",
         )
-        db.add(user); db.commit(); db.refresh(user)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
         audit("signup_via_google", request, user_id=user.id, email=user.email)
 
     enforce_2fa = bool(g.enforce_2fa_all)
@@ -637,8 +801,16 @@ async def google_auth_callback(
             status_code=303,
         )
 
-    resp, _, _ = _issue_auth_code_and_session(user, target_client_id, target_redirect_uri, app_state, request)
-    audit("login_via_google", request, user_id=user.id, email=user.email, client_id=target_client_id)
+    resp, _, _ = _issue_auth_code_and_session(
+        user, target_client_id, target_redirect_uri, app_state, request
+    )
+    audit(
+        "login_via_google",
+        request,
+        user_id=user.id,
+        email=user.email,
+        client_id=target_client_id,
+    )
     return resp
 
 
@@ -679,9 +851,16 @@ def token_endpoint(
             raise HTTPException(status_code=400, detail="user not active")
         sid = payload.get("sid")
         scope = payload.get("scope", "openid profile email")
-        access_token = create_access_token(user.id, client_id, scope=scope,
-                                           roles=user.roles_list, sid=sid,
-                                           email=user.email, name=user.name, picture=user.picture)
+        access_token = create_access_token(
+            user.id,
+            client_id,
+            scope=scope,
+            roles=user.roles_list,
+            sid=sid,
+            email=user.email,
+            name=user.name,
+            picture=user.picture,
+        )
         new_refresh = issue_refresh_token(user.id, client_id, sid, scope=scope)
         return {
             "access_token": access_token,
@@ -705,7 +884,9 @@ def token_endpoint(
         raise HTTPException(status_code=400, detail="Invalid or expired code")
 
     if code_data["client_id"] != client_id or code_data["redirect_uri"] != redirect_uri:
-        raise HTTPException(status_code=400, detail="Code client_id/redirect_uri mismatch")
+        raise HTTPException(
+            status_code=400, detail="Code client_id/redirect_uri mismatch"
+        )
 
     # Verify PKCE if a challenge was provided during authorization
     expected_challenge = code_data.get("code_challenge")
@@ -715,12 +896,23 @@ def token_endpoint(
         method = code_data.get("code_challenge_method", "plain")
         if method == "S256":
             import hashlib, base64
-            computed = base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
+
+            computed = (
+                base64.urlsafe_b64encode(
+                    hashlib.sha256(code_verifier.encode("ascii")).digest()
+                )
+                .rstrip(b"=")
+                .decode("ascii")
+            )
             if computed != expected_challenge:
-                raise HTTPException(status_code=400, detail="Invalid PKCE code_verifier")
+                raise HTTPException(
+                    status_code=400, detail="Invalid PKCE code_verifier"
+                )
         elif method == "plain":
             if code_verifier != expected_challenge:
-                raise HTTPException(status_code=400, detail="Invalid PKCE code_verifier")
+                raise HTTPException(
+                    status_code=400, detail="Invalid PKCE code_verifier"
+                )
         else:
             raise HTTPException(status_code=400, detail="Unsupported PKCE method")
 
@@ -732,10 +924,24 @@ def token_endpoint(
         raise HTTPException(status_code=404, detail="User not found")
 
     sid = code_data.get("sid")
-    id_token = create_id_token(user.id, user.email, user.name, client_id, user.picture,
-                               roles=user.roles_list, sid=sid)
-    access_token = create_access_token(user.id, client_id, roles=user.roles_list, sid=sid,
-                                       email=user.email, name=user.name, picture=user.picture)
+    id_token = create_id_token(
+        user.id,
+        user.email,
+        user.name,
+        client_id,
+        user.picture,
+        roles=user.roles_list,
+        sid=sid,
+    )
+    access_token = create_access_token(
+        user.id,
+        client_id,
+        roles=user.roles_list,
+        sid=sid,
+        email=user.email,
+        name=user.name,
+        picture=user.picture,
+    )
     refresh = issue_refresh_token(user.id, client_id, sid)
 
     return {
@@ -759,6 +965,7 @@ def userinfo_endpoint(request: Request, db: Session = Depends(get_db)):
 
     token = auth_header.split(" ", 1)[1]
     from auth_utils import decode_token
+
     payload = decode_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid access token")
@@ -784,69 +991,75 @@ def userinfo_endpoint(request: Request, db: Session = Depends(get_db)):
 # OIDC RP-Initiated Logout 1.0 (front-channel)
 #   https://openid.net/specs/openid-connect-rpinitiated-1_0.html
 #
-# Query parameters:
-#   id_token_hint            — optional; identifies client (aud) and user (sub)
+# POST parameters (Form data):
+#   id_token_hint            — REQUIRED; signed JWT identifying client (aud) and user (sub)
 #   post_logout_redirect_uri — optional, must be registered for the client
 #   state                    — optional, echoed back
+#   client_id               — optional, fallback if id_token_hint doesn't contain aud
 #
-# Query parameters:
-#   id_token_hint         — optional (or end_session_endpoint may use sub lookup)
-#   post_logout_redirect_uri — optional, must be registered for the client
-#   state                 — optional, echoed back
-#   client_id             — required when post_logout_redirect_uri is used
+# Security:
+#   - Changed from GET to POST to prevent CSRF attacks
+#   - id_token_hint is now REQUIRED and validated (signature + client registration)
+#   - JWT expiration is NOT verified (stale tokens must still identify the client)
 #
 # Flow:
-#   1. The user clicks "Sign Out" on any client app
-#   2. Client app redirects the browser to /logout?id_token_hint=...
-#   3. Auth server verifies the id_token, then terminates the central SSO
-#      session and dispatches OIDC Back-Channel Logout 1.0 to every other
+#   1. Client app POSTs to /logout with id_token_hint in form body
+#   2. Auth server verifies the JWT signature and client registration
+#   3. Auth server terminates the central SSO session
+#   4. Auth server dispatches OIDC Back-Channel Logout 1.0 to every other
 #      client app the user had a session with.
-#   4. Auth server redirects the browser back to the client's
+#   5. Auth server redirects the browser back to the client's
 #      post_logout_redirect_uri (or the global POST_LOGOUT_REDIRECT_URL).
 # ===========================================================================
-@router.get("/logout")
-def logout(
+@router.post("/logout")
+async def logout(
     request: Request,
-    id_token_hint: Optional[str] = None,
-    post_logout_redirect_uri: Optional[str] = None,
-    state: Optional[str] = None,
-    client_id: Optional[str] = None,
+    id_token_hint: str = Form(...),  # REQUIRED: signed JWT from client
+    post_logout_redirect_uri: Optional[str] = Form(None),
+    state: Optional[str] = Form(None),
+    client_id: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
-    # --- Resolve the client (from id_token_hint) and the user -------------
-    #
-    # Standard OIDC RP-Initiated Logout: id_token_hint is OPTIONAL.
-    # Its `aud` claim gives the client_id; its `sub` claim gives the user_id.
-    # Expiration is NOT verified (a stale token must still identify the client).
-    # If not provided, we try to infer from SSO session cookie.
-    user_id = None
-    originating_client_id = None
-    sso_session_id = request.cookies.get("sso_session")
+    from auth_utils import decode_token
 
-    if id_token_hint:
-        from auth_utils import decode_token
-        payload = decode_token(id_token_hint, verify_exp=False)
-        if payload:
-            user_id = payload.get("sub")
-            originating_client_id = payload.get("aud")
-    else:
-        # No id_token_hint — try SSO session cookie for user_id
-        if sso_session_id:
-            sess = get_cache(f"sso_session:{sso_session_id}")
-            if sess:
-                user_id = sess.get("user_id")
+    # --- Validate id_token_hint (REQUIRED) ---
+    # Decode and verify JWT signature
+    payload = decode_token(id_token_hint, verify_exp=False)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or tampered id_token_hint")
 
-    # If client_id is explicitly provided (e.g. by the client app), use it
-    # as the originating client. This allows logout without id_token_hint.
-    if client_id:
+    # Extract user and client info from JWT
+    user_id = payload.get("sub")
+    originating_client_id = payload.get("aud") or payload.get("client_id")
+
+    # If id_token doesn't have aud/client_id, try explicit client_id parameter
+    if not originating_client_id and client_id:
         originating_client_id = client_id
 
-    # If we still don't have a client_id but have a user_id, we can still
-    # perform logout for that user (centralized logout), but we won't be
-    # able to validate post_logout_redirect_uri against a specific client.
-    client = None
-    if originating_client_id:
-        client = db.query(ClientApp).filter(ClientApp.client_id == originating_client_id).first()
+    # --- Verify client is registered ---
+    if not originating_client_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Cannot determine client_id from id_token_hint or parameters",
+        )
+
+    client = (
+        db.query(ClientApp).filter(ClientApp.client_id == originating_client_id).first()
+    )
+
+    if not client:
+        raise HTTPException(
+            status_code=401, detail=f"Unknown client_id: {originating_client_id}"
+        )
+
+    # --- Check if we have a valid user_id ---
+    if not user_id:
+        raise HTTPException(
+            status_code=401, detail="Missing user_id (sub claim) in id_token_hint"
+        )
+
+    # Get SSO session ID from cookies (for session cleanup)
+    sso_session_id = request.cookies.get("sso_session")
 
     # --- Validate post_logout_redirect_uri against the client configuration
     #
@@ -867,12 +1080,19 @@ def logout(
 
     # Perform centralized logout (sso_session + back-channel)
     summary = perform_centralized_logout(
-        request=request, db=db,
-        user_id=user_id, sso_session_id=sso_session_id,
+        request=request,
+        db=db,
+        user_id=user_id,
+        sso_session_id=sso_session_id,
         originating_client_id=originating_client_id,
     )
-    audit("logout", request, user_id=user_id, client_id=originating_client_id,
-          extra={"summary": summary})
+    audit(
+        "logout",
+        request,
+        user_id=user_id,
+        client_id=originating_client_id,
+        extra={"summary": summary},
+    )
 
     # Append state if provided (front-channel state preservation)
     if state:
@@ -898,6 +1118,7 @@ def backchannel_logout_info(request: Request, db: Session = Depends(get_db)):
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required")
     from auth_utils import decode_token
+
     payload = decode_token(auth_header.split(" ", 1)[1])
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid token")
@@ -906,11 +1127,18 @@ def backchannel_logout_info(request: Request, db: Session = Depends(get_db)):
     sessions = {}
     if user_id:
         from logout import get_user_clients
+
         sessions = get_user_clients(user_id)
 
-    clients = (db.query(ClientApp)
-                 .filter(ClientApp.client_id.in_(sessions.keys()) if sessions else ClientApp.id.is_(None))
-                 .all())
+    clients = (
+        db.query(ClientApp)
+        .filter(
+            ClientApp.client_id.in_(sessions.keys())
+            if sessions
+            else ClientApp.id.is_(None)
+        )
+        .all()
+    )
     return {
         "backchannel_logout_globally_enabled": settings.BACKCHANNEL_LOGOUT_ENABLED,
         "user_id": user_id,
@@ -920,7 +1148,11 @@ def backchannel_logout_info(request: Request, db: Session = Depends(get_db)):
                 "client_name": c.client_name,
                 "sid": sessions.get(c.client_id),
                 "backchannel_logout_enabled": c.backchannel_logout_enabled,
-                "backchannel_logout_uris": (c.backchannel_logout_uris or "").split(",") if c.backchannel_logout_uris else [],
+                "backchannel_logout_uris": (
+                    (c.backchannel_logout_uris or "").split(",")
+                    if c.backchannel_logout_uris
+                    else []
+                ),
             }
             for c in clients
         ],
@@ -986,6 +1218,7 @@ def oauth_introspect(
 
     # Fall back to access-token (JWT)
     from auth_utils import decode_token
+
     payload = decode_token(token)
     if payload:
         return {
@@ -1009,6 +1242,7 @@ def oauth_session_active(request: Request):
     access token refresh will 400 and the app will start seeing 401s
     here."""
     from auth_utils import decode_token
+
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required")

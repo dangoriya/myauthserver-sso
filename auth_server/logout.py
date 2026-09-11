@@ -60,7 +60,9 @@ _BCTX_TIMEOUT = 5.0
 # ---------------------------------------------------------------------------
 # Track user sessions per client (used for back-channel logout)
 # ---------------------------------------------------------------------------
-def register_user_session(user_id: str, client_id: str, sid: Optional[str] = None) -> str:
+def register_user_session(
+    user_id: str, client_id: str, sid: Optional[str] = None
+) -> str:
     """Record that `user_id` has an active session on `client_id`.
 
     Returns the generated session id (a stable id used as `sid` in
@@ -106,7 +108,9 @@ def clear_user_session(user_id: str, client_id: Optional[str] = None) -> dict:
 # ---------------------------------------------------------------------------
 # Logout token (signed JWT) for back-channel logout
 # ---------------------------------------------------------------------------
-def build_logout_token(client_id: str, sub: str, sid: Optional[str] = None) -> tuple[str, str]:
+def build_logout_token(
+    client_id: str, sub: str, sid: Optional[str] = None
+) -> tuple[str, str]:
     """Build a signed logout_token JWT for a specific client.
 
     Returns (token, jti). The jti should be stored briefly so we can
@@ -126,8 +130,9 @@ def build_logout_token(client_id: str, sub: str, sid: Optional[str] = None) -> t
     if sid:
         payload["sid"] = sid
 
-    token = jwt.encode(payload, get_private_pem(), algorithm="RS256",
-                       headers={"kid": get_kid()})
+    token = jwt.encode(
+        payload, get_private_pem(), algorithm="RS256", headers={"kid": get_kid()}
+    )
     return token, jti
 
 
@@ -143,7 +148,11 @@ def _post_logout(client: ClientApp, logout_token: str) -> tuple[bool, Optional[s
 
     Returns (success, error_message).
     """
-    uris = [u.strip() for u in (client.backchannel_logout_uris or "").split(",") if u.strip()]
+    uris = [
+        u.strip()
+        for u in (client.backchannel_logout_uris or "").split(",")
+        if u.strip()
+    ]
     if not uris:
         return False, "no backchannel_logout_uris registered"
 
@@ -162,21 +171,37 @@ def _post_logout(client: ClientApp, logout_token: str) -> tuple[bool, Optional[s
                         },
                     )
                 if 200 <= res.status_code < 300:
-                    logger.info("Back-channel logout delivered to %s (client=%s, status=%d)",
-                                uri, client.client_id, res.status_code)
+                    logger.info(
+                        "Back-channel logout delivered to %s (client=%s, status=%d)",
+                        uri,
+                        client.client_id,
+                        res.status_code,
+                    )
                     return True, None
                 last_err = f"HTTP {res.status_code}: {res.text[:200]}"
-                logger.warning("Back-channel logout to %s returned %d (attempt %d/%d): %s",
-                               uri, res.status_code, attempt, _BCTX_RETRIES, last_err)
+                logger.warning(
+                    "Back-channel logout to %s returned %d (attempt %d/%d): %s",
+                    uri,
+                    res.status_code,
+                    attempt,
+                    _BCTX_RETRIES,
+                    last_err,
+                )
             except Exception as e:
                 last_err = str(e)
-                logger.warning("Back-channel logout to %s failed (attempt %d/%d): %s",
-                               uri, attempt, _BCTX_RETRIES, e)
+                logger.warning(
+                    "Back-channel logout to %s failed (attempt %d/%d): %s",
+                    uri,
+                    attempt,
+                    _BCTX_RETRIES,
+                    e,
+                )
     return False, last_err
 
 
-def notify_clients_backchannel(user_id: str, current_client_id: Optional[str] = None,
-                               db=None) -> dict:
+def notify_clients_backchannel(
+    user_id: str, current_client_id: Optional[str] = None, db=None
+) -> dict:
     """Notify all clients that have an active session for `user_id`.
 
     If `current_client_id` is given, we still notify it (its session is
@@ -189,13 +214,19 @@ def notify_clients_backchannel(user_id: str, current_client_id: Optional[str] = 
 
     results: dict = {}
     for client_id, sid in sessions.items():
-        client = (db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
-                  if db is not None else None)
+        client = (
+            db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
+            if db is not None
+            else None
+        )
         if not client:
             results[client_id] = {"ok": False, "error": "client not found"}
             continue
         if not client.backchannel_logout_enabled or not client.backchannel_logout_uris:
-            results[client_id] = {"ok": False, "error": "back-channel logout not configured"}
+            results[client_id] = {
+                "ok": False,
+                "error": "back-channel logout not configured",
+            }
             continue
 
         token, _jti = build_logout_token(client_id, user_id, sid)
@@ -218,9 +249,11 @@ def resolve_global_post_logout_url() -> str:
 
     Priority: POST_LOGOUT_REDIRECT_URL → LOGOUT_REDIRECT_URL → AUTH_SERVER_URL
     """
-    return (settings.POST_LOGOUT_REDIRECT_URL
-            or settings.LOGOUT_REDIRECT_URL
-            or settings.AUTH_SERVER_URL)
+    return (
+        settings.POST_LOGOUT_REDIRECT_URL
+        or settings.LOGOUT_REDIRECT_URL
+        or settings.AUTH_SERVER_URL
+    )
 
 
 def is_valid_post_logout_uri(client: ClientApp, post_logout_redirect_uri: str) -> bool:
@@ -231,10 +264,14 @@ def is_valid_post_logout_uri(client: ClientApp, post_logout_redirect_uri: str) -
     """
     if not post_logout_redirect_uri:
         return False
-    uris = [u.strip().rstrip('/') for u in (client.post_logout_redirect_uris or "").split(",") if u.strip()]
+    uris = [
+        u.strip().rstrip("/")
+        for u in (client.post_logout_redirect_uris or "").split(",")
+        if u.strip()
+    ]
     if not uris:
         return False
-    return post_logout_redirect_uri.rstrip('/') in uris
+    return post_logout_redirect_uri.rstrip("/") in uris
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +301,18 @@ def perform_centralized_logout(
             summary["sso_session_terminated"] = True
 
     if user_id:
+        # Delete any active sso_session keys in Redis for this user_id
+        try:
+            from redis_client import redis_client
+            if redis_client is not None:
+                for key in redis_client.scan_iter("sso_session:*"):
+                    val = get_cache(key)
+                    if isinstance(val, dict) and val.get("user_id") == user_id:
+                        delete_cache(key)
+                        summary["sso_session_terminated"] = True
+        except Exception as e:
+            logger.warning("Error scanning sso_session keys for %s: %s", user_id, e)
+
         # Revoke every refresh token for this user. Once these are gone,
         # no client app can mint a new access token — they are all forced
         # to re-authenticate. This is the *primary* enforcement mechanism
@@ -279,15 +328,21 @@ def perform_centralized_logout(
             del sessions[originating_client_id]
         if sessions:
             if not settings.BACKCHANNEL_LOGOUT_ENABLED:
-                logger.info("Back-channel logout is globally disabled; skipping client notifications")
+                logger.info(
+                    "Back-channel logout is globally disabled; skipping client notifications"
+                )
                 summary["backchannel_results"] = {}
             elif db is not None:
-                summary["backchannel_results"] = notify_clients_backchannel(user_id, db=db)
+                summary["backchannel_results"] = notify_clients_backchannel(
+                    user_id, db=db
+                )
             else:
                 # No DB available: still fire the POSTs but without client
                 # names. notify_clients_backchannel handles db=None by
                 # looking up clients via a simple in-memory dict fallback.
-                summary["backchannel_results"] = _notify_backchannel_no_db(user_id, sessions)
+                summary["backchannel_results"] = _notify_backchannel_no_db(
+                    user_id, sessions
+                )
         clear_user_session(user_id)
 
     return summary
@@ -301,11 +356,14 @@ def _notify_backchannel_no_db(user_id: str, sessions: dict) -> dict:
     """
     from database import SessionLocal
     from models import ClientApp
+
     results = {}
     db = SessionLocal()
     try:
         for client_id in list(sessions.keys()):
-            client = db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
+            client = (
+                db.query(ClientApp).filter(ClientApp.client_id == client_id).first()
+            )
             if not client:
                 results[client_id] = {"ok": False, "error": "client not found"}
                 continue
